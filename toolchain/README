@@ -1,0 +1,54 @@
+RISC-V toolchain
+================
+
+Here you can find the RISC-V toolchain and patches.
+
+Preparation
+-----------
+
+Script `toolsprep.sh` will clone RISC-V tools repository, and its submodules
+from GitHub, checkout to the right commit and apply the patches for Xscen
+extension support.  After successful execution the source files are in
+riscv-tools directory.
+Following packages are required on Ubuntu to build RISC-V toolchain:
+
+autoconf automake autotools-dev curl device-tree-compiler libmpc-dev libmpfr-dev
+libgmp-dev gawk build-essential bison flex texinfo gperf libtool patchutils bc
+zlib1g-dev
+
+Requirements for other systems may be different. Refer to RISC-V toolchain
+documentation for more information.
+
+```
+./toolsprep.sh
+```
+
+Building
+--------
+
+After preparations, you can build the toolchain following the standard procedure
+by setting the RISCV environment variable to install destination directory and
+running `build-rv32ima.sh` in riscv-tools directory. It's recommended to add
+`MAKE="$MAKE -j4"` to build.common file below the `MAKE=...` line, to speed up
+the build process.
+
+```
+export RISCV=/home/user/riscv-install
+./build-rv32ima.sh
+```
+
+Usage
+-----
+
+Add `$RISCV/bin` to your PATH environment variable and make sure that the tools
+are available by running `which riscv32-unknown-elf-gcc`.  Now you can compile C
+programs for RISC-V with `riscv32-unknown-elf-gcc` and run them with
+`spike pk a.out`.
+
+```
+export PATH=$PATH:/home/user/riscv-install/bin
+which riscv32-unknown-elf-gcc
+cd ../dopserv
+make
+spike dopserv.noio.bare.wlibc.xscen
+```

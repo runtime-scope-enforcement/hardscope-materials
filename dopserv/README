@@ -1,0 +1,39 @@
+Evaluation code for DOP attack
+==============================
+
+Build instructions
+------------------
+
+`riscv32-unknown-elf-gcc` binary must be in PATH and the assembler must support Xscen extensions.
+Makefile uses GCC with `-Xassembler -march=rv32i`,
+
+ELF file that can be run with spike and proxy kernel under Linux: `make dopserv`
+
+Bare binary with no IO: make target dopserv.noio.bare `make dopserv.noio.bare`
+
+Instrumented binary: `make dopserv.noio.bare.wlibc.xscen`
+
+Bare binaries for pulpino core:
+- copy this directory under sw/apps
+- add line add_subdirectory(dopserv) to sw/apps/CMakeList.txt
+- run the build
+  - mkdir sw/build
+  - cp cmake_configure.riscv.gcc.sh sw/build/
+  - cd sw/build
+  - ./cmake_configure.riscv.gcc.sh
+  - make
+- build/apps/dopserv/ contains binaries
+
+Running instructions
+--------------------
+
+Bare binaries: `spike <binary name>`
+
+Binaries with proxy kernel dependencies: `spike pk <binary name>`
+
+Exploit
+-------
+
+`exploit.py` is a script that generates a simple payload to trigger the buffer overflow vulnerability in `sreplace` function.
+It can not be used to conduct a full DOP attack at the moment.
+Exploit payload is included in `dopserv_noio_attack.c` and it is compiled into the noio binaries that can be used for bare metal targets.

@@ -1,0 +1,754 @@
+diff --git a/riscv/encoding.h b/riscv/encoding.h
+index 35e0f9f..1613b60 100644
+--- a/riscv/encoding.h
++++ b/riscv/encoding.h
+@@ -150,7 +150,7 @@
+ 
+ #ifdef __riscv
+ 
+-#ifdef __riscv64
++#if __riscv_xlen == 64
+ # define MSTATUS_SD MSTATUS64_SD
+ # define SSTATUS_SD SSTATUS64_SD
+ # define RISCV_PGLEVEL_BITS 9
+@@ -669,6 +669,22 @@
+ #define MASK_CUSTOM3_RD_RS1  0x707f
+ #define MATCH_CUSTOM3_RD_RS1_RS2 0x707b
+ #define MASK_CUSTOM3_RD_RS1_RS2  0x707f
++
++#define MATCH_XSCEN_SBENT 0x7b
++#define MASK_XSCEN_SBENT  0xffffffff
++#define MATCH_XSCEN_SRBSE 0x107b
++#define MASK_XSCEN_SRBSE  0x1f0707f
++#define MATCH_XSCEN_SRLMT 0x207b
++#define MASK_XSCEN_SRLMT  0x1f0707f
++#define MATCH_XSCEN_SRDLG 0x307b
++#define MASK_XSCEN_SRDLG  0x1f0707f
++#define MATCH_XSCEN_SRDLGM 0x407b
++#define MASK_XSCEN_SRDLGM  0x1f0707f
++#define MATCH_XSCEN_SBXIT 0x507b
++#define MASK_XSCEN_SBXIT  0xffffffff
++#define MATCH_XSCEN_SRSUB 0x607b
++#define MASK_XSCEN_SRSUB  0x000707f
++
+ #define CSR_FFLAGS 0x1
+ #define CSR_FRM 0x2
+ #define CSR_FCSR 0x3
+@@ -1103,6 +1119,15 @@ DECLARE_INSN(custom3_rs1_rs2, MATCH_CUSTOM3_RS1_RS2, MASK_CUSTOM3_RS1_RS2)
+ DECLARE_INSN(custom3_rd, MATCH_CUSTOM3_RD, MASK_CUSTOM3_RD)
+ DECLARE_INSN(custom3_rd_rs1, MATCH_CUSTOM3_RD_RS1, MASK_CUSTOM3_RD_RS1)
+ DECLARE_INSN(custom3_rd_rs1_rs2, MATCH_CUSTOM3_RD_RS1_RS2, MASK_CUSTOM3_RD_RS1_RS2)
++
++DECLARE_INSN(sbent, MATCH_XSCEN_SBENT, MASK_XSCEN_SBENT)
++DECLARE_INSN(srbse, MATCH_XSCEN_SRBSE, MASK_XSCEN_SRBSE)
++DECLARE_INSN(srlmt, MATCH_XSCEN_SRLMT, MASK_XSCEN_SRLMT)
++DECLARE_INSN(srdlg, MATCH_XSCEN_SRDLG, MASK_XSCEN_SRDLG)
++DECLARE_INSN(srdlgm, MATCH_XSCEN_SRDLGM, MASK_XSCEN_SRDLGM)
++DECLARE_INSN(sbxit, MATCH_XSCEN_SBXIT, MASK_XSCEN_SBXIT)
++DECLARE_INSN(srsub, MATCH_XSCEN_SRSUB, MASK_XSCEN_SRSUB)
++
+ #endif
+ #ifdef DECLARE_CSR
+ DECLARE_CSR(fflags, CSR_FFLAGS)
+diff --git a/riscv/execute.cc b/riscv/execute.cc
+index eb9fe4b..7e0f2c3 100644
+--- a/riscv/execute.cc
++++ b/riscv/execute.cc
+@@ -50,6 +50,7 @@ static reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
+   if (!invalid_pc(npc)) {
+     commit_log_print_insn(p->get_state(), pc, fetch.insn);
+     p->update_histogram(pc);
++    p->get_state()->instcntr++;
+   }
+   return npc;
+ }
+diff --git a/riscv/insns/sbent.h b/riscv/insns/sbent.h
+new file mode 100644
+index 0000000..f203342
+--- /dev/null
++++ b/riscv/insns/sbent.h
+@@ -0,0 +1,9 @@
++validate_csr(CSR_CYCLE, false);
++printf("sbent pc=%lx\n", pc);
++srs_t *srs;
++srs = p->get_mmu()->get_srs();
++if (!srs->is_on(p->get_state()->prv)) {
++  srs->turn_on(p->get_state()->prv);
++}
++srs->switch_ctx(p->get_state()->minstret, pc, p->get_state()->instcntr, SBENT);
++srs->enter();
+diff --git a/riscv/insns/sbxit.h b/riscv/insns/sbxit.h
+new file mode 100644
+index 0000000..762a4cd
+--- /dev/null
++++ b/riscv/insns/sbxit.h
+@@ -0,0 +1,6 @@
++validate_csr(CSR_CYCLE, false);
++printf("sbxit pc=%lx\n", pc);
++srs_t *srs;
++srs = p->get_mmu()->get_srs();
++srs->switch_ctx(p->get_state()->minstret, pc, p->get_state()->instcntr, SBXIT);
++srs->exit();
+diff --git a/riscv/insns/srbse.h b/riscv/insns/srbse.h
+new file mode 100644
+index 0000000..299d19a
+--- /dev/null
++++ b/riscv/insns/srbse.h
+@@ -0,0 +1,5 @@
++reg_t base = RS1 + insn.s_imm();
++printf("srbse 0x%lx pc=%lx\n", base, pc);
++srs_t *srs;
++srs = p->get_mmu()->get_srs();
++srs->base(base);
+diff --git a/riscv/insns/srdlg.h b/riscv/insns/srdlg.h
+new file mode 100644
+index 0000000..da5ada2
+--- /dev/null
++++ b/riscv/insns/srdlg.h
+@@ -0,0 +1,5 @@
++reg_t addr = RS1 + insn.s_imm();
++printf("srdlg 0x%lx pc=%lx\n", addr, pc);
++srs_t *srs;
++srs = p->get_mmu()->get_srs();
++srs->delegate(addr);
+diff --git a/riscv/insns/srdlgm.h b/riscv/insns/srdlgm.h
+new file mode 100644
+index 0000000..dc08072
+--- /dev/null
++++ b/riscv/insns/srdlgm.h
+@@ -0,0 +1,5 @@
++reg_t addr = RS1 + insn.s_imm();
++printf("srdlgm 0x%lx pc=%lx\n", addr, pc);
++srs_t *srs;
++srs = p->get_mmu()->get_srs();
++srs->delegate_move(addr);
+diff --git a/riscv/insns/srlmt.h b/riscv/insns/srlmt.h
+new file mode 100644
+index 0000000..576dcb0
+--- /dev/null
++++ b/riscv/insns/srlmt.h
+@@ -0,0 +1,5 @@
++reg_t limit = RS1 + insn.s_imm();
++printf("srlmt 0x%lx pc=%lx\n", limit, pc);
++srs_t *srs;
++srs = p->get_mmu()->get_srs();
++srs->limit(limit);
+diff --git a/riscv/insns/srsub.h b/riscv/insns/srsub.h
+new file mode 100644
+index 0000000..d5cc860
+--- /dev/null
++++ b/riscv/insns/srsub.h
+@@ -0,0 +1,6 @@
++reg_t base = RS1;
++reg_t limit = RS2 + insn.s_imm();
++printf("srsub 0x%lx 0x%lx pc=%lx\n", base, limit, pc);
++srs_t *srs;
++srs = p->get_mmu()->get_srs();
++srs->sub(base, limit);
+diff --git a/riscv/mmu.cc b/riscv/mmu.cc
+index 878d849..2339ee4 100644
+--- a/riscv/mmu.cc
++++ b/riscv/mmu.cc
+@@ -12,6 +12,7 @@ mmu_t::mmu_t(sim_t* sim, processor_t* proc)
+   matched_trigger(NULL)
+ {
+   flush_tlb();
++  srs = new srs_t();
+ }
+ 
+ mmu_t::~mmu_t()
+diff --git a/riscv/mmu.h b/riscv/mmu.h
+index 34bcf99..f7c1c59 100644
+--- a/riscv/mmu.h
++++ b/riscv/mmu.h
+@@ -10,6 +10,8 @@
+ #include "sim.h"
+ #include "processor.h"
+ #include "memtracer.h"
++#include "srs.h"
++#include "trap.h"
+ #include <stdlib.h>
+ #include <vector>
+ 
+@@ -51,9 +53,18 @@ public:
+   mmu_t(sim_t* sim, processor_t* proc);
+   ~mmu_t();
+ 
++  srs_t *get_srs() { return srs; }
+   // template for functions that load an aligned value from memory
++      //if (proc && proc->get_state() && proc->get_state()->pc < 0x8000000 && srs->is_on() && !srs->access_check(addr, sizeof(type##_t))) {
++
+   #define load_func(type) \
+     inline type##_t load_##type(reg_t addr) { \
++      if (proc && proc->get_state() && srs->is_on(proc->get_state()->prv) && !srs->access_check(addr, sizeof(type##_t))) {\
++        srs->print_state(); \
++        printf("scope violation when loading 0x%08lx, len=%lu, pc=%lx\n", addr, sizeof(type##_t), proc->get_state()->pc); \
++        srs->turn_off(); \
++        throw trap_load_access_fault(addr); \
++      } \
+       if (addr & (sizeof(type##_t)-1)) \
+         throw trap_load_address_misaligned(addr); \
+       reg_t vpn = addr >> PGSHIFT; \
+@@ -86,8 +97,15 @@ public:
+   load_func(int64)
+ 
+   // template for functions that store an aligned value to memory
++      //if (proc && proc->get_state() && proc->get_state()->pc < 0x8000000 && srs->is_on() && !srs->access_check(addr, sizeof(type##_t))) {
+   #define store_func(type) \
+     void store_##type(reg_t addr, type##_t val) { \
++      if (proc && proc->get_state() && srs->is_on(proc->get_state()->prv) && !srs->access_check(addr, sizeof(type##_t))) {\
++        srs->print_state(); \
++        printf("scope violation when storing 0x%08lx, len=%lu, pc=%lx\n", addr, sizeof(type##_t), proc->get_state()->pc); \
++        srs->turn_off(); \
++        throw trap_store_access_fault(addr); \
++      } \
+       if (addr & (sizeof(type##_t)-1)) \
+         throw trap_store_address_misaligned(addr); \
+       reg_t vpn = addr >> PGSHIFT; \
+@@ -258,6 +276,11 @@ private:
+   trigger_matched_t *matched_trigger;
+ 
+   friend class processor_t;
++
++  /* scope enforcement extension */
++  friend class srs_t;
++
++  srs_t *srs;
+ };
+ 
+ #endif
+diff --git a/riscv/processor.h b/riscv/processor.h
+index 8a9ff47..91cb355 100644
+--- a/riscv/processor.h
++++ b/riscv/processor.h
+@@ -119,6 +119,7 @@ struct state_t
+   reg_t tselect;
+   mcontrol_t mcontrol[num_triggers];
+   reg_t tdata2[num_triggers];
++  reg_t instcntr;
+ 
+   uint32_t fflags;
+   uint32_t frm;
+diff --git a/riscv/riscv.mk.in b/riscv/riscv.mk.in
+index 552187a..052b72d 100644
+--- a/riscv/riscv.mk.in
++++ b/riscv/riscv.mk.in
+@@ -25,6 +25,7 @@ riscv_hdrs = \
+ 	mulhi.h \
+ 	gdbserver.h \
+ 	debug_module.h \
++	srs.h \
+ 
+ riscv_precompiled_hdrs = \
+ 	insn_template.h \
+@@ -47,6 +48,7 @@ riscv_srcs = \
+ 	rtc.cc \
+ 	gdbserver.cc \
+ 	debug_module.cc \
++	srs.cc \
+ 	$(riscv_gen_srcs) \
+ 
+ riscv_test_srcs =
+@@ -252,6 +254,13 @@ riscv_insn_list = \
+ 	wfi \
+ 	xor \
+ 	xori \
++	sbent \
++	srbse \
++	srlmt \
++	srdlg \
++	srdlgm \
++	sbxit \
++	srsub \
+ 
+ riscv_gen_srcs = \
+ 	$(addsuffix .cc,$(riscv_insn_list))
+diff --git a/riscv/sim.cc b/riscv/sim.cc
+index b455105..55c066e 100644
+--- a/riscv/sim.cc
++++ b/riscv/sim.cc
+@@ -81,13 +81,21 @@ void sim_t::main()
+       gdbserver->handle();
+     }
+   }
++
+ }
+ 
+ int sim_t::run()
+ {
++  int ret;
+   host = context_t::current();
+   target.init(sim_thread_main, this);
+-  return htif_t::run();
++  ret = htif_t::run();
++
++  for (auto proc : procs) {
++    srs_t *srs = proc->get_mmu()->get_srs();
++    srs->print_stats(proc);
++  }
++  return ret;
+ }
+ 
+ void sim_t::step(size_t n)
+diff --git a/riscv/srs.cc b/riscv/srs.cc
+new file mode 100644
+index 0000000..2f91303
+--- /dev/null
++++ b/riscv/srs.cc
+@@ -0,0 +1,357 @@
++#include "srs.h"
++#include "processor.h"
++#include <stdio.h>
++#include <stdlib.h>
++
++#define SRS_ASSERT(x, m) if(!(x)){printf("SRS_ASSERT FAILED: " m "\n");print_state();abort();}
++
++srs_t::srs_t() : 
++  stack_size(0), last_ctx_switch(0), on(false), mode(-1), inst_count{0},
++  context_switches(0), fast_context_switches(0), access_check_cntr(0) {
++  bank_a = {0, {(struct srs_entry){0, 0}}};
++  bank_b = {0, {(struct srs_entry){0, 0}}};
++}
++
++
++bool srs_t::is_on(reg_t priv) {
++  return on && (priv == mode);
++}
++
++void srs_t::turn_on(reg_t priv) {
++  mode = priv;
++  on = true;
++}
++
++void srs_t::turn_off() {
++  on = false;
++}
++
++void srs_t::push() {
++  SRS_ASSERT(stack_size < SRS_STACK_FRAMES, "SRS stack overflow")
++  unsigned int n = bank_a.active;
++  struct srs_frame *frame = &stack[stack_size];
++  frame->count = n;
++  frame->entries = new struct srs_entry[n];
++
++  for (unsigned int i = 0; i < n; i++) {
++    struct srs_entry e;
++    e = bank_a.entries[i];
++    frame->entries[i] = e;
++  }
++
++  stack_size++;
++}
++
++void srs_t::pop() {
++  SRS_ASSERT(stack_size > 0, "SRS stack is empty");
++  struct srs_frame *frame = &stack[stack_size-1];
++  unsigned int popn = frame->count;
++  unsigned int dlgn = bank_b.active;
++  SRS_ASSERT(popn+dlgn < SRS_ENTRIES, "Saved SRS frame wont fit to registers");
++
++  for (unsigned int i = 0; i < popn; i++) {
++    struct srs_entry e;
++    e = frame->entries[i];
++    bank_b.entries[i+dlgn] = e;
++  }
++
++  bank_b.active = popn+dlgn;
++  stack_size--;
++}
++
++void srs_t::bank_swap() {
++  struct srs_bank tmp;
++  tmp = bank_a;
++  bank_a = bank_b;
++  bank_b = tmp;
++  bank_b.active = 0;
++}
++
++void srs_t::enter() {
++  inst_count[SBENT]++;
++  push();
++  bank_a.active = 0;
++  bank_swap();
++}
++
++void srs_t::exit() {
++  inst_count[SBXIT]++;
++  pop();
++  bank_swap();
++  if (stack_size == 0) {
++    bank_a.active = 0;
++    on = false;
++  }
++}
++
++void srs_t::base(reg_t addr) {
++  SRS_ASSERT(bank_a.active <= SRS_ENTRIES, "SRBSE: bank A is full");
++  inst_count[SRBSE]++;
++  unsigned int i = bank_a.active;
++  bank_a.entries[i].base = addr;
++}
++
++void srs_t::limit(reg_t addr) {
++  SRS_ASSERT(bank_a.active <= SRS_ENTRIES, "SRLMT: bank A is full");
++  inst_count[SRLMT]++;
++  unsigned int i = bank_a.active;
++  bank_a.entries[i].limit = addr;
++  SRS_ASSERT(bank_a.entries[i].base <= addr, "limit can't be less than base");
++  bank_a.active++;
++}
++
++void srs_t::delegate(reg_t addr) {
++  inst_count[SRDLG]++;
++  SRS_ASSERT(bank_a.active > 0, "no active entries in bank A");
++  SRS_ASSERT(bank_b.active < SRS_ENTRIES, "bank B is already full");
++  struct srs_entry *e = find_entry(addr);
++  SRS_ASSERT(e != NULL, "can't find a matching entry from bank A");
++  unsigned int i = bank_b.active;
++  bank_b.entries[i].base = e->base;
++  bank_b.entries[i].limit = e->limit;
++  bank_b.active++;
++}
++
++void srs_t::delegate_move(reg_t addr) {
++  inst_count[SRDLGM]++;
++  SRS_ASSERT(bank_a.active > 0, "no active entries in bank A");
++  SRS_ASSERT(bank_b.active < SRS_ENTRIES, "bank B is already full");
++
++  struct srs_entry *e = find_entry(addr);
++  SRS_ASSERT(e != NULL, "can't find a matching entry from bank A");
++  SRS_ASSERT(e == &bank_a.entries[bank_a.active-1], "match found, but it's not on the top of the frame");
++  unsigned int i = bank_b.active;
++  bank_b.entries[i].base = e->base;
++  bank_b.entries[i].limit = e->limit;
++  bank_b.active++;
++  bank_a.active--;
++}
++
++void srs_t::sub(reg_t base, reg_t limit) {
++  SRS_ASSERT(limit >= base, "SRSUB: limit must be greater than or equal to base");
++  inst_count[SRSUB]++;
++  reg_t regsize = limit-base+1;
++  bool ok = access_check(base, regsize);
++  SRS_ASSERT(ok, "SRSUB: sub region is not in bounds of any rule");
++
++  SRS_ASSERT(bank_a.active <= SRS_ENTRIES, "SRSUB: bank A is full");
++  unsigned int i = bank_a.active;
++  bank_a.entries[i].base = base;
++  bank_a.entries[i].limit = limit;
++  bank_a.active++;
++}
++
++bool srs_t::access_check(reg_t addr, size_t len) {
++  if (!on) return true;
++    access_check_cntr++;
++
++  if (bank_a.active == 0) return false;
++  for (int i = bank_a.active-1; i >= 0; i--) {
++    struct srs_entry e;
++    e = bank_a.entries[i];
++    if (addr+len-1 <= e.limit &&
++        addr       >= e.base) return true;
++  }
++  return false;
++}
++
++struct srs_entry *srs_t::find_entry(reg_t addr) {
++  if (bank_a.active == 0) return NULL;
++  for (int i = bank_a.active-1; i >= 0; i--) {
++    struct srs_entry e;
++    e = bank_a.entries[i];
++    if (e.base <= addr && e.limit >= addr) {
++      return &bank_a.entries[i];
++    }
++  }
++  return NULL;
++}
++
++void srs_t::switch_ctx(reg_t cycle, reg_t pc, reg_t instcntr, int instruction) {
++  //print_state();
++  ctx_switch_stats.push_back((struct ctx_switch_stat){instruction, bank_a.active, bank_b.active, instcntr});
++ // abort();
++  ////printf("context switch at %lu cycles, last at %lu, pc=%lx, instcntr=%lu\n", cycle, last_ctx_switch, pc, instcntr);
++  if (last_ctx_switch && cycle < last_ctx_switch+SRS_ENTRIES) {
++    //printf("fast context switch (%lu cycles)\n", cycle-last_ctx_switch);
++    fast_context_switches++;
++  }
++
++  context_switches++;
++  last_ctx_switch = cycle;
++}
++
++void srs_t::print_state() {
++  printf("   SRS STATE:   frames in stack: %d\n", stack_size);
++  printf("   %10s %-30u    %10s %-30u\n", "BANK A", bank_a.active, "BANK B", bank_b.active);
++  printf("   %-18s %-18s    %-18s %-18s\n", "base", "limit", "base", "limit");
++  for (unsigned int i = 0; i < bank_a.active || i < bank_b.active; i++) {
++    printf("%3s", "");
++    if (i < bank_a.active) {
++      struct srs_entry e;
++      e = bank_a.entries[i];
++      printf("0x%016lx 0x%016lx", e.base, e.limit);
++    }
++    printf("%4s", "");
++    if (i < bank_b.active) {
++      struct srs_entry e;
++      e = bank_b.entries[i];
++      printf("0x%016lx 0x%016lx", e.base, e.limit);
++    }
++    printf("\n");
++  }
++  printf("\n");
++}
++
++void srs_t::print_stats(processor_t *proc) {
++  fprintf(stderr, "Total number of instructions executed: %lu\n", proc->get_state()->instcntr);
++  fprintf(stderr, "Cycles reported by CPU: %lu\n", proc->get_state()->minstret);
++  fprintf(stderr, "Xscen instructions: %u\n", total_instructions());
++  fprintf(stderr, "  %s: %5u %5u\n", "sbent ", get_inst_count(SBENT), get_cycle_count(SBENT));
++  fprintf(stderr, "  %s: %5u %5u\n", "srbse ", get_inst_count(SRBSE), get_cycle_count(SRBSE));
++  fprintf(stderr, "  %s: %5u %5u\n", "srlmt ", get_inst_count(SRLMT), get_cycle_count(SRLMT));
++  fprintf(stderr, "  %s: %5u %5u\n", "srdlg ", get_inst_count(SRDLG), get_cycle_count(SRDLG));
++  fprintf(stderr, "  %s: %5u %5u\n", "srdlgm", get_inst_count(SRDLGM), get_cycle_count(SRDLGM));
++  fprintf(stderr, "  %s: %5u %5u\n", "sbxit ", get_inst_count(SBXIT), get_cycle_count(SBXIT));
++  fprintf(stderr, "  %s: %5u %5u\n", "srsub ", get_inst_count(SRSUB), get_cycle_count(SRSUB));
++  fprintf(stderr, "Xscen context switches: %u\n", get_context_switches());
++  fprintf(stderr, "Xscen fast context switches: %u\n", get_fast_context_switches());
++  fprintf(stderr, "Access checks: %u\n", get_access_check_cntr());
++
++  if (ctx_switch_stats.empty()) return;
++  unsigned int i = 0, fast = 0;
++  double sumdiff = 0;
++  double sumbanka = 0;
++  double sumbankb = 0;
++  reg_t lastcycles = 0;
++  unsigned int cshist[SRS_ENTRIES] = {0};
++  unsigned int cshist_a[SRS_ENTRIES] = {0};
++  unsigned int cshist_b[SRS_ENTRIES] = {0};
++  unsigned int cshist_move[SRS_ENTRIES] = {0};
++  unsigned int cshist_movefast[SRS_ENTRIES] = {0};
++  unsigned int cshist_stacktot[SRS_ENTRIES*10] = {0};
++  lastcycles = ctx_switch_stats[0].cycles;
++  unsigned int to_move = 0;
++  unsigned int tot_stack = 0;
++  unsigned int big_stack = 0;
++  unsigned int tot_stall = 0;
++  unsigned int add_cycles = 0;
++  std::vector<unsigned int> stackn;
++
++  for (i=1; i < ctx_switch_stats.size(); i++) {
++    //cycles between two context switches
++    unsigned int diff = ctx_switch_stats[i].cycles-lastcycles-1;
++    unsigned int banka = ctx_switch_stats[i].bankA;
++    unsigned int bankb = ctx_switch_stats[i].bankB;
++
++    to_move = 0;
++    if (ctx_switch_stats[i].instruction == SBENT) {
++      if (!stackn.empty())
++        to_move = stackn.back();
++    } else {
++      if (stackn.size() > 1)
++        to_move = *(stackn.end()-2);
++    }
++
++    cshist_move[to_move]++;
++    if (ctx_switch_stats[i].instruction == SBXIT) {
++      cshist_stacktot[tot_stack]++;
++    }
++    if (diff < SRS_ENTRIES) {
++      fast++;
++      cshist[diff]++;
++      cshist_a[banka]++;
++      cshist_b[bankb]++;
++      sumdiff += diff;
++      sumbanka += banka;
++      sumbankb += bankb;
++
++      if (diff < to_move) {
++        cshist_movefast[to_move-diff]++;
++        tot_stall += to_move-diff;
++      }
++    }
++    lastcycles = ctx_switch_stats[i].cycles;
++
++    //keep track of stack
++    if (ctx_switch_stats[i].instruction == SBENT) {
++      tot_stack += banka;
++      stackn.push_back(banka);
++    } else {
++      tot_stack -= stackn.back();
++      stackn.pop_back();
++    }
++    big_stack = big_stack > tot_stack ? big_stack : tot_stack;
++//    printf("%s %-6u %-6u\n",ctx_switch_stats[i].instruction == SBENT ? "SBENT" : "SBXIT", diff, to_move);
++//    if (ctx_switch_stats[i].instruction == SBXIT)
++//      printf("XX %u,%u\n", diff, banka);
++  }
++
++  add_cycles = tot_stall;
++  add_cycles += total_cycles();
++
++  fprintf(stderr, "fast ctx switch (total %d/%d) distribution, cycles:\n", fast, i);
++  fprintf(stderr, "columns:\n");
++  fprintf(stderr, "       ctx switch cycle diff\n");
++  fprintf(stderr, "              bank a size\n");
++  fprintf(stderr, "                     bank b size\n");
++  fprintf(stderr, "                            entries to move to/from cache\n");
++  fprintf(stderr, "                                   move count - cycles\n");
++  fprintf(stderr, "                                          total stack size on exit\n");
++  for (int i = 0; i < (int) big_stack || i < SRS_ENTRIES; i++) {
++    fprintf(stderr, "  %3d:", i);
++    if (i<SRS_ENTRIES) {
++      fprintf(stderr, " %-6d", cshist[i]);
++      fprintf(stderr, " %-6d", cshist_a[i]);
++      fprintf(stderr, " %-6d", cshist_b[i]);
++      fprintf(stderr, " %-6d", cshist_move[i]);
++      fprintf(stderr, " %-6d", cshist_movefast[i]);
++    }
++    fprintf(stderr, " %-6d\n", cshist_stacktot[i]);
++  }
++
++  fprintf(stderr, "total cycles reported without xscen cycles: %-6lu\n", proc->get_state()->minstret-total_instructions());
++  fprintf(stderr, "total stalling due to fast ctx switches: %-6d\n", tot_stall);
++  fprintf(stderr, "total extra cycles from Xscen instructions: %-6d\n", add_cycles);
++  fprintf(stderr, "total approximated cycles: %-6lu\n", proc->get_state()->minstret-total_instructions()+add_cycles);
++}
++
++unsigned int srs_t::get_cycle_count(int instr) {
++  return inst_count[instr]*cycle_counts[instr];
++}
++
++unsigned int srs_t::total_cycles() {
++  int total = 0;
++  total += get_cycle_count(SBENT);
++  total += get_cycle_count(SRBSE);
++  total += get_cycle_count(SRLMT);
++  total += get_cycle_count(SRDLG);
++  total += get_cycle_count(SRDLGM);
++  total += get_cycle_count(SBXIT);
++  total += get_cycle_count(SRSUB);
++  return total;
++}
++
++unsigned int srs_t::get_inst_count(int instr) {
++  return inst_count[instr];
++}
++
++unsigned int srs_t::total_instructions() {
++  int total = 0;
++  for (auto it : inst_count) {
++    total += it;
++  }
++  return total;
++}
++
++unsigned int srs_t::get_context_switches() {
++  return context_switches;
++}
++
++unsigned int srs_t::get_fast_context_switches() {
++  return fast_context_switches;
++}
++
++unsigned int srs_t::get_access_check_cntr() {
++  return access_check_cntr;
++}
+diff --git a/riscv/srs.h b/riscv/srs.h
+new file mode 100644
+index 0000000..c4a00bb
+--- /dev/null
++++ b/riscv/srs.h
+@@ -0,0 +1,93 @@
++#ifndef _RISCV_SRS_H
++#define _RISCV_SRS_H
++
++#include "decode.h"
++#include "processor.h"
++#include <vector>
++
++#define SRS_STACK_FRAMES 32
++#define SRS_ENTRIES 32
++
++enum {
++  SBENT,
++  SRBSE,
++  SRLMT,
++  SRDLG,
++  SRDLGM,
++  SBXIT,
++  SRSUB
++};
++
++static unsigned int cycle_counts[] {1,1,1,2,2,1,2};
++
++struct srs_entry {
++  reg_t base;
++  reg_t limit;
++};
++
++struct srs_frame {
++  unsigned int count;
++  struct srs_entry *entries;
++};
++
++struct srs_bank {
++  unsigned int active;
++  struct srs_entry entries[SRS_ENTRIES];
++};
++
++struct ctx_switch_stat {
++  int instruction;
++  unsigned int bankA;
++  unsigned int bankB;
++  reg_t cycles;
++};
++
++class srs_t {
++private:
++  struct srs_bank bank_a;
++  struct srs_bank bank_b;
++  struct srs_frame stack[SRS_STACK_FRAMES];
++  unsigned int stack_size;
++  reg_t last_ctx_switch;
++  bool on;
++  reg_t mode;
++
++  unsigned int inst_count[7];
++  unsigned int context_switches;
++  unsigned int fast_context_switches;
++  unsigned int access_check_cntr;
++
++  std::vector<ctx_switch_stat> ctx_switch_stats;
++
++  struct srs_entry *find_free(reg_t addr);
++  struct srs_entry *find_entry(reg_t addr);
++  void bank_swap();
++  void push();
++  void pop();
++
++public:
++  srs_t();
++  bool is_on(reg_t priv);
++  void turn_off();
++  void turn_on(reg_t priv);
++  bool access_check(reg_t addr, size_t len);
++  void enter();
++  void exit();
++  void base(reg_t addr);
++  void limit(reg_t addr);
++  void delegate(reg_t addr);
++  void delegate_move(reg_t addr);
++  void sub(reg_t base, reg_t limit);
++  void switch_ctx(reg_t cycle, reg_t pc, reg_t instcntr, int instruction);
++  void print_state();
++  unsigned int get_inst_count(int instr);
++  unsigned int get_cycle_count(int instr);
++  unsigned int total_instructions();
++  unsigned int total_cycles();
++  unsigned int get_context_switches();
++  unsigned int get_fast_context_switches();
++  unsigned int get_access_check_cntr();
++  void print_stats(processor_t *proc);
++};
++
++#endif

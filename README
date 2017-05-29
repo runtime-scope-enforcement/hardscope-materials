@@ -1,0 +1,10 @@
+This package contains the accompanying material for "HardScope: Hardware-assisted
+Run-time Scope Enforcement" including additional documents on the instruction set
+extension and ProFTPd DOP-attack, test program used for evaluation, and patches
+and installation instructions for RISC-V toolchain including RISC-V simulator
+and build tools.
+
+Contents of sub-directories:
+- docs: additional documents
+- dopserv: evaluation code and instructions for building and running it
+- toolchain: RISC-V toolchain installation instructions and patches

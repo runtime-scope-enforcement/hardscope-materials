@@ -1,0 +1,53 @@
+diff --git a/include/opcode/riscv-opc.h b/include/opcode/riscv-opc.h
+index 09d680b..7c5804e 100644
+--- a/include/opcode/riscv-opc.h
++++ b/include/opcode/riscv-opc.h
+@@ -565,6 +565,22 @@
+ #define MASK_CUSTOM3_RD_RS1  0x707f
+ #define MATCH_CUSTOM3_RD_RS1_RS2 0x707b
+ #define MASK_CUSTOM3_RD_RS1_RS2  0x707f
++
++#define MATCH_XSCEN_SBENT 0x7b
++#define MASK_XSCEN_SBENT  0xffffffff
++#define MATCH_XSCEN_SRBSE 0x107b
++#define MASK_XSCEN_SRBSE  0x1f0707f
++#define MATCH_XSCEN_SRLMT 0x207b
++#define MASK_XSCEN_SRLMT  0x1f0707f
++#define MATCH_XSCEN_SRDLG 0x307b
++#define MASK_XSCEN_SRDLG  0x1f0707f
++#define MATCH_XSCEN_SRDLGM 0x407b
++#define MASK_XSCEN_SRDLGM  0x1f0707f
++#define MATCH_XSCEN_SBXIT 0x507b
++#define MASK_XSCEN_SBXIT  0xffffffff
++#define MATCH_XSCEN_SRSUB 0x607b
++#define MASK_XSCEN_SRSUB  0x000707f
++
+ #define CSR_FFLAGS 0x1
+ #define CSR_FRM 0x2
+ #define CSR_FCSR 0x3
+diff --git a/opcodes/riscv-opc.c b/opcodes/riscv-opc.c
+index c1b42ed..8c333f0 100644
+--- a/opcodes/riscv-opc.c
++++ b/opcodes/riscv-opc.c
+@@ -680,6 +680,21 @@ const struct riscv_opcode riscv_opcodes[] =
+ {"sfence.vm", "I",   "s",    MATCH_SFENCE_VM, MASK_SFENCE_VM, match_opcode, 0 },
+ {"wfi",       "I",   "",     MATCH_WFI, MASK_WFI, match_opcode, 0 },
+ 
++/* scope enforcement */
++#define MASK_SIMM ENCODE_STYPE_IMM(-1U)
++{"sbent",     "Xscen",   "",     MATCH_XSCEN_SBENT, MASK_XSCEN_SBENT, match_opcode, 0 },
++{"srbse",     "Xscen",   "q(s)", MATCH_XSCEN_SRBSE, MASK_XSCEN_SRBSE, match_opcode, 0 },
++{"srbse",     "Xscen",   "s",    MATCH_XSCEN_SRBSE, MASK_XSCEN_SRBSE | MASK_SIMM, match_opcode, INSN_ALIAS },
++{"srlmt",     "Xscen",   "q(s)", MATCH_XSCEN_SRLMT, MASK_XSCEN_SRLMT, match_opcode, 0 },
++{"srlmt",     "Xscen",   "s",    MATCH_XSCEN_SRLMT, MASK_XSCEN_SRLMT | MASK_SIMM, match_opcode, INSN_ALIAS },
++{"srdlg",     "Xscen",   "q(s)", MATCH_XSCEN_SRDLG, MASK_XSCEN_SRDLG, match_opcode, 0 },
++{"srdlg",     "Xscen",   "s",    MATCH_XSCEN_SRDLG, MASK_XSCEN_SRDLG | MASK_SIMM, match_opcode, INSN_ALIAS },
++{"srdlgm",    "Xscen",   "q(s)", MATCH_XSCEN_SRDLGM, MASK_XSCEN_SRDLGM, match_opcode, 0 },
++{"srdlgm",    "Xscen",   "s",    MATCH_XSCEN_SRDLGM, MASK_XSCEN_SRDLGM | MASK_SIMM, match_opcode, INSN_ALIAS },
++{"sbxit",     "Xscen",   "",     MATCH_XSCEN_SBXIT, MASK_XSCEN_SBXIT, match_opcode, 0 },
++{"srsub",     "Xscen",   "s,q(t)", MATCH_XSCEN_SRSUB, MASK_XSCEN_SRSUB, match_opcode, 0 },
++{"srsub",     "Xscen",   "s,t",    MATCH_XSCEN_SRSUB, MASK_XSCEN_SRSUB | MASK_SIMM, match_opcode, INSN_ALIAS },
++
+ /* Terminate the list.  */
+ {0, 0, 0, 0, 0, 0, 0}
+ };
