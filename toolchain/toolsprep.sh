@@ -21,3 +21,5 @@ cd $OLDPWD
 
 apply_patch $riscvtools/riscv-isa-sim $patches/riscv-isa-sim.patch
 apply_patch $riscvtools/riscv-gnu-toolchain/riscv-binutils-gdb $patches/riscv-binutils-gdb.patch
+apply_patch $riscvtools/riscv-gnu-toolchain/riscv-gcc $patches/riscv-gcc.patch
+apply_patch $riscvtools $patches/riscv-tools.patch

@@ -1,0 +1,20 @@
+HardScope compiler extension
+============================
+
+This is a GCC compiler extension that analyses the target program and passes analysis data to RISC-V backend.
+
+Building
+--------
+
+1. Install prerequisites: HardScope enabled GCC (version 6.1.0) for RISC-V
+2. Set environment variable `RISCV` to point to the installation directory. Makefile will use $RISCV/lib/gcc/riscv32-unknown-elf/6.1.0/plugin/include/ to look for headers.
+3. Run `make scen.so`
+
+Usage
+-----
+
+GCC plugins are loaded with `-fplugin` option on the command line.
+
+```
+riscv32-unknown-elf-gcc -mxscen -fplugin=./scen.so -Xassembler -march=rv32imxscen my.c
+```

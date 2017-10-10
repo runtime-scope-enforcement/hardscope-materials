@@ -1,0 +1,25 @@
+diff --git a/build-rv32ima.sh b/build-rv32ima.sh
+index 65e93ae..75c69ce 100755
+--- a/build-rv32ima.sh
++++ b/build-rv32ima.sh
+@@ -8,7 +8,7 @@
+ echo "Starting RISC-V Toolchain build process"
+ 
+ build_project riscv-fesvr --prefix=$RISCV
+-build_project riscv-isa-sim --prefix=$RISCV --with-fesvr=$RISCV --with-isa=rv32ima
++build_project riscv-isa-sim --prefix=$RISCV --with-fesvr=$RISCV --with-isa=rv32ima --enable-pulpino
+ build_project riscv-gnu-toolchain --prefix=$RISCV --with-arch=rv32ima --with-abi=ilp32
+ CC= CXX= build_project riscv-pk --prefix=$RISCV --host=riscv32-unknown-elf
+ 
+diff --git a/build.common b/build.common
+index 3b6a1c4..80da245 100644
+--- a/build.common
++++ b/build.common
+@@ -9,6 +9,7 @@ fi
+ 
+ # Use gmake instead of make if it exists.
+ MAKE=`command -v gmake || command -v make`
++MAKE="$MAKE -j4"
+ 
+ PATH="$RISCV/bin:$PATH"
+ #GCC_VERSION=`gcc -v 2>&1 | tail -1 | awk '{print $3}'`

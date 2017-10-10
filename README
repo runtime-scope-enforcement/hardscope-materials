@@ -1,10 +1,29 @@
-This package contains the accompanying material for "HardScope: Hardware-assisted
-Run-time Scope Enforcement" including additional documents on the instruction set
-extension and ProFTPd DOP-attack, test program used for evaluation, and patches
-and installation instructions for RISC-V toolchain including RISC-V simulator
-and build tools.
+This archive contains accompanying materials for
 
-Contents of sub-directories:
+HardScope: Thwarting DOP with Hardware-assisted Run-time Scope Enforcement
+==========================================================================
+
+Materials include additional documents on the instruction set extension and
+ProFTPD DOP-attack, CoreMark port files and scripts to run it, test program
+for ProFTPD attack, GCC plug-in for HardScope instrumentation, and patches
+and instructions for the compiler toolchain.
+
+Directories
+-----------
+
+- coremark_v1.0: CoreMark port files for benchmarking
 - docs: additional documents
 - dopserv: evaluation code and instructions for building and running it
+- scen-plug: HardScope plugin for GCC
 - toolchain: RISC-V toolchain installation instructions and patches
+
+Instructions
+------------
+
+To compile HardScope binaries and run them in Spike you must
+
+1. build and install the toolchain
+2. build the plug-in
+
+After that you can run CoreMark benchmark and compile other code.
+More help can be found from README files in each directory.

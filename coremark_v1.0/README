@@ -1,0 +1,26 @@
+CoreMark scripts for RISC-V HardScope
+=====================================
+
+This directory contains CoreMark port for RISC-V to support HardScope instrumentation.
+
+Unfortunately due to restrictions in the CoreMark license, we are unable include
+the CoreMark source code or prebuilt binaries in the accompanying material. However,
+you can obtain a copy of CoreMark from EEMBC at http://www.eembc.org/coremark/download.php.
+
+Instructions
+------------
+
+1. Install prerequisites: HardScope RISC-V GCC compiler toolchain and Spike
+2. Download CoreMark v1.0: http://www.eembc.org/coremark/download.php
+3. Extract the archive to this directory
+4. Build an instrumented and a vanilla binary with make:
+
+```
+make PORT_DIR=riscv ITERATIONS=100 XSCEN=1 XCFLAGS=-DPROFILE_RUN=1 PULPINO=1 coremark.bin
+mv coremark.bin coremark-xscen.bin
+make PORT_DIR=riscv ITERATIONS=100 XCFLAGS=-DPROFILE_RUN=1 PULPINO=1 coremark.bin
+```
+
+5. Run the files with spike: `spike --xscen=1 coremark-xscen.bin 1>coremark-xscen.bin.stdout 2>coremark-xscen.bin.stderr`
+6. Run vanilla coremark with spike: `spike --xscen=1 coremark.bin 1>coremark.bin.stdout 2>coremark.bin.stderr`
+7. Run analysis scripts on the output: `scripts/all_stats.sh coremark-xscen.bin`

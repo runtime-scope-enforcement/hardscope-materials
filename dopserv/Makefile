@@ -3,25 +3,22 @@ OBJDUMP=riscv32-unknown-elf-objdump
 RISCV_GCC_BARE_LNK_OPTS=-ffreestanding -nostartfiles
 RISCV_GCC_OPTS=
 RISCV_LIBGCC_FILE=bare/libgcc.a
+demobin=dopserv.noio.bare dopserv.noio.bare.attack dopserv.noio.bare.wlibc.xscen dopserv.noio.bare.wlibc.xscen.attack
 
-.PHONY: all clean
+.PHONY: all clean demo
 
-all: dopserv dopserv.noio.bare.wlibc.xscen dopserv.noio.bare.wlibc.xscen.attack
+all: dopserv dopserv.noio.*
+
+demo: $(demobin)
 
 clean:
-	rm -f dopserv dopserv.noio.bare dopserv.noio.bare.o bare/crt.o bare/syscalls.o bare/syscalls.o bare/syscalls.xscen.o bare/dopserv.noio.bare.o bare/libc.xscen.o dopserv.noio.bare.xscen dopserv.noio.bare.wlibc.xscen dopserv.noio.bare.wlibc.xscen.attack test.o dopserv.noio.bare.attack dopserv.noio.bare dopserv.noio.bare.xscen.attack dopserv.x86 dopserv.x86.bare
+	rm -f dopserv bare/crt.o bare/syscalls.o bare/syscalls.xscen.o bare/libc.xscen.o dopserv.noio.bare.o $(demobin)
 
 dopserv.noio.bare.wlibc.xscen.attack: bare/crt.o bare/syscalls.xscen.o bare/bare.ld dopserv.noio.bare.wlibc.xscen.S dopserv_noio_attack.c bare/libc.xscen.o xscen-macros.S
 	$(CC) -Tbare/bare.ld $(RISCV_GCC_BARE_LNK_OPTS) -static -nostdlib -Lbare -o $@ dopserv.noio.bare.wlibc.xscen.S bare/syscalls.xscen.o $(RISCV_LIBGCC_FILE) dopserv_noio_attack.c bare/libc.xscen.o
 
 dopserv.noio.bare.wlibc.xscen: bare/crt.o bare/syscalls.xscen.o bare/bare.ld dopserv.noio.bare.wlibc.xscen.S dopserv_noio.c bare/libc.xscen.o xscen-macros.S
 	$(CC) -Tbare/bare.ld $(RISCV_GCC_BARE_LNK_OPTS) -static -nostdlib -Lbare -o $@ dopserv.noio.bare.wlibc.xscen.S bare/syscalls.xscen.o $(RISCV_LIBGCC_FILE) dopserv_noio.c bare/libc.xscen.o
-
-dopserv.noio.bare.xscen.attack: bare/crt.o bare/syscalls.o bare/bare.ld dopserv.noio.bare.xscen.S dopserv_noio_attack.c bare/libc.c xscen-macros.S
-	$(CC) -Tbare/bare.ld $(RISCV_GCC_BARE_LNK_OPTS) -static -nostdlib -Lbare -o $@ dopserv.noio.bare.xscen.S bare/syscalls.o $(RISCV_LIBGCC_FILE) dopserv_noio_attack.c bare/libc.c
-
-dopserv.noio.bare.xscen: bare/crt.o bare/syscalls.o bare/bare.ld dopserv.noio.bare.xscen.S dopserv_noio.c bare/libc.c xscen-macros.S
-	$(CC) -Tbare/bare.ld $(RISCV_GCC_BARE_LNK_OPTS) -static -nostdlib -Lbare -o $@ dopserv.noio.bare.xscen.S bare/syscalls.o $(RISCV_LIBGCC_FILE) dopserv_noio.c bare/libc.c
 
 dopserv.noio.bare.attack: bare/crt.o bare/syscalls.o bare/bare.ld dopserv.noio.bare.o dopserv_noio_attack.c bare/libc.c
 	$(CC) -Tbare/bare.ld $(RISCV_GCC_BARE_LNK_OPTS) -static -nostdlib -Lbare -o $@ dopserv.noio.bare.o bare/syscalls.o $(RISCV_LIBGCC_FILE) dopserv_noio_attack.c bare/libc.c
@@ -35,14 +32,8 @@ bare/syscalls.S: bare/syscalls.c
 bare/syscalls.xscen.o: bare/syscalls.xscen.S xscen-macros.S
 	$(CC) -DBARE -static -fno-stack-protector $(RISCV_GCC_OPTS) -c -o $@ $<
 
-bare/libc.S: bare/libc.c
-	$(CC) -DBARE -static -fno-stack-protector $(RISCV_GCC_OPTS) -S -o $@ $<
-
 bare/libc.xscen.o: bare/libc.xscen.S xscen-macros.S
 	$(CC) -DBARE -static -fno-stack-protector $(RISCV_GCC_OPTS) -c -o $@ $<
-
-dopserv.noio.bare.S: dopserv.c
-	$(CC) -DBARE -static -fno-stack-protector $(RISCV_GCC_OPTS) -S -o $@ $<
 
 dopserv.noio.bare.o: dopserv.c
 	$(CC) -DBARE -static -fno-stack-protector $(RISCV_GCC_OPTS) -c -o $@ $<
@@ -55,6 +46,13 @@ bare/syscalls.o: bare/syscalls.c
 	
 dopserv: dopserv.c dopserv.h
 	$(CC) -Wall -fno-stack-protector -o $@ -Wl,--section-start=.data=01ff0000 dopserv.c
+
+dopserv_noio_attack.c: exploit.py
+	echo 'char stdinbuf[] = {' >$@
+	./$^ | xxd -i >>$@
+	echo -n ',' >>$@
+	echo QUIT | xxd -i >>$@
+	echo '};' >>$@
 
 insns.log: dopserv.noio.bare.wlibc.xscen
 	spike ./dopserv.noio.bare.wlibc.xscen 2>/dev/null | grep -E 'sbent|sbxit|srbse|srlmt|srdlg|srdlgm .*pc=' | awk 'NF==2 {print $$0} NF==3 {print $$1,$$3}' >insns.log

@@ -1,8 +1,93 @@
+diff --git a/config.h.in b/config.h.in
+index a4070ff..bdaa11c 100644
+--- a/config.h.in
++++ b/config.h.in
+@@ -69,6 +69,9 @@
+ /* Enable PC histogram generation */
+ #undef RISCV_ENABLE_HISTOGRAM
+ 
++/* Enable Pulpino-compatible memory mapping */
++#undef RISCV_ENABLE_PULPINO
++
+ /* Define if subproject MCPPBS_SPROJ_NORM is enabled */
+ #undef SOFTFLOAT_ENABLED
+ 
+diff --git a/configure b/configure
+index 2c946e7..100a2af 100755
+--- a/configure
++++ b/configure
+@@ -703,6 +703,7 @@ with_isa
+ with_fesvr
+ enable_commitlog
+ enable_histogram
++enable_pulpino
+ '
+       ac_precious_vars='build_alias
+ host_alias
+@@ -1336,6 +1337,7 @@ Optional Features:
+                           Enable all optional subprojects
+   --enable-commitlog      Enable commit log generation
+   --enable-histogram      Enable PC histogram generation
++  --enable-pulpino        Enable Pulpino-compatible memory mappings
+ 
+ Optional Packages:
+   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
+@@ -4607,6 +4609,19 @@ $as_echo "#define RISCV_ENABLE_HISTOGRAM /**/" >>confdefs.h
+ 
+ fi
+ 
++# Check whether --enable-pulpino was given.
++if test "${enable_pulpino+set}" = set; then :
++  enableval=$enable_pulpino;
++fi
++
++if test "x$enable_pulpino" = "xyes"; then :
++
++
++$as_echo "#define RISCV_ENABLE_PULPINO /**/" >>confdefs.h
++
++
++fi
++
+ 
+ 
+ 
 diff --git a/riscv/encoding.h b/riscv/encoding.h
-index 35e0f9f..1613b60 100644
+index 35e0f9f..8d91572 100644
 --- a/riscv/encoding.h
 +++ b/riscv/encoding.h
-@@ -150,7 +150,7 @@
+@@ -1,5 +1,7 @@
+ // See LICENSE for license details.
+ 
++#include "config.h"
++
+ #ifndef RISCV_CSR_ENCODING_H
+ #define RISCV_CSR_ENCODING_H
+ 
+@@ -126,12 +128,21 @@
+ #define IRQ_COP      12
+ #define IRQ_HOST     13
+ 
++
++#ifdef RISCV_ENABLE_PULPINO
++#define DRAM_BASE          0x00000000
++#define DEFAULT_RSTVEC     0x00000080
++#define DEFAULT_NMIVEC     0x00000084
++#define DEFAULT_MTVEC      0x00000088
++#define EXT_IO_BASE        0x40000000
++#else
++#define DRAM_BASE          0x80000000
+ #define DEFAULT_RSTVEC     0x00001000
+ #define DEFAULT_NMIVEC     0x00001004
+ #define DEFAULT_MTVEC      0x00001010
+ #define CONFIG_STRING_ADDR 0x0000100C
+ #define EXT_IO_BASE        0x40000000
+-#define DRAM_BASE          0x80000000
++#endif
+ 
+ // page table entry (PTE) fields
+ #define PTE_V     0x001 // Valid
+@@ -150,7 +161,7 @@
  
  #ifdef __riscv
  
@@ -11,7 +96,7 @@ index 35e0f9f..1613b60 100644
  # define MSTATUS_SD MSTATUS64_SD
  # define SSTATUS_SD SSTATUS64_SD
  # define RISCV_PGLEVEL_BITS 9
-@@ -669,6 +669,22 @@
+@@ -669,6 +680,22 @@
  #define MASK_CUSTOM3_RD_RS1  0x707f
  #define MATCH_CUSTOM3_RD_RS1_RS2 0x707b
  #define MASK_CUSTOM3_RD_RS1_RS2  0x707f
@@ -34,7 +119,7 @@ index 35e0f9f..1613b60 100644
  #define CSR_FFLAGS 0x1
  #define CSR_FRM 0x2
  #define CSR_FCSR 0x3
-@@ -1103,6 +1119,15 @@ DECLARE_INSN(custom3_rs1_rs2, MATCH_CUSTOM3_RS1_RS2, MASK_CUSTOM3_RS1_RS2)
+@@ -1103,6 +1130,15 @@ DECLARE_INSN(custom3_rs1_rs2, MATCH_CUSTOM3_RS1_RS2, MASK_CUSTOM3_RS1_RS2)
  DECLARE_INSN(custom3_rd, MATCH_CUSTOM3_RD, MASK_CUSTOM3_RD)
  DECLARE_INSN(custom3_rd_rs1, MATCH_CUSTOM3_RD_RS1, MASK_CUSTOM3_RD_RS1)
  DECLARE_INSN(custom3_rd_rs1_rs2, MATCH_CUSTOM3_RD_RS1_RS2, MASK_CUSTOM3_RD_RS1_RS2)
@@ -50,21 +135,9 @@ index 35e0f9f..1613b60 100644
  #endif
  #ifdef DECLARE_CSR
  DECLARE_CSR(fflags, CSR_FFLAGS)
-diff --git a/riscv/execute.cc b/riscv/execute.cc
-index eb9fe4b..7e0f2c3 100644
---- a/riscv/execute.cc
-+++ b/riscv/execute.cc
-@@ -50,6 +50,7 @@ static reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
-   if (!invalid_pc(npc)) {
-     commit_log_print_insn(p->get_state(), pc, fetch.insn);
-     p->update_histogram(pc);
-+    p->get_state()->instcntr++;
-   }
-   return npc;
- }
 diff --git a/riscv/insns/sbent.h b/riscv/insns/sbent.h
 new file mode 100644
-index 0000000..f203342
+index 0000000..de7d96a
 --- /dev/null
 +++ b/riscv/insns/sbent.h
 @@ -0,0 +1,9 @@
@@ -75,11 +148,11 @@ index 0000000..f203342
 +if (!srs->is_on(p->get_state()->prv)) {
 +  srs->turn_on(p->get_state()->prv);
 +}
-+srs->switch_ctx(p->get_state()->minstret, pc, p->get_state()->instcntr, SBENT);
++srs->switch_ctx(p->get_state()->minstret, pc, SBENT);
 +srs->enter();
 diff --git a/riscv/insns/sbxit.h b/riscv/insns/sbxit.h
 new file mode 100644
-index 0000000..762a4cd
+index 0000000..4d13d27
 --- /dev/null
 +++ b/riscv/insns/sbxit.h
 @@ -0,0 +1,6 @@
@@ -87,7 +160,7 @@ index 0000000..762a4cd
 +printf("sbxit pc=%lx\n", pc);
 +srs_t *srs;
 +srs = p->get_mmu()->get_srs();
-+srs->switch_ctx(p->get_state()->minstret, pc, p->get_state()->instcntr, SBXIT);
++srs->switch_ctx(p->get_state()->minstret, pc, SBXIT);
 +srs->exit();
 diff --git a/riscv/insns/srbse.h b/riscv/insns/srbse.h
 new file mode 100644
@@ -158,7 +231,7 @@ index 878d849..2339ee4 100644
  
  mmu_t::~mmu_t()
 diff --git a/riscv/mmu.h b/riscv/mmu.h
-index 34bcf99..f7c1c59 100644
+index 34bcf99..cecc565 100644
 --- a/riscv/mmu.h
 +++ b/riscv/mmu.h
 @@ -10,6 +10,8 @@
@@ -170,42 +243,35 @@ index 34bcf99..f7c1c59 100644
  #include <stdlib.h>
  #include <vector>
  
-@@ -51,9 +53,18 @@ public:
+@@ -51,9 +53,14 @@ public:
    mmu_t(sim_t* sim, processor_t* proc);
    ~mmu_t();
  
 +  srs_t *get_srs() { return srs; }
    // template for functions that load an aligned value from memory
-+      //if (proc && proc->get_state() && proc->get_state()->pc < 0x8000000 && srs->is_on() && !srs->access_check(addr, sizeof(type##_t))) {
 +
    #define load_func(type) \
      inline type##_t load_##type(reg_t addr) { \
-+      if (proc && proc->get_state() && srs->is_on(proc->get_state()->prv) && !srs->access_check(addr, sizeof(type##_t))) {\
-+        srs->print_state(); \
-+        printf("scope violation when loading 0x%08lx, len=%lu, pc=%lx\n", addr, sizeof(type##_t), proc->get_state()->pc); \
-+        srs->turn_off(); \
-+        throw trap_load_access_fault(addr); \
++      if (proc && proc->get_state() && srs->is_on(proc->get_state()->prv) && !srs->access_check(addr, sizeof(type##_t), proc->get_state()->pc)) {\
++        srs->violation(addr, sizeof(type##_t), XSCEN_ACCESS_LOAD, proc); \
 +      } \
        if (addr & (sizeof(type##_t)-1)) \
          throw trap_load_address_misaligned(addr); \
        reg_t vpn = addr >> PGSHIFT; \
-@@ -86,8 +97,15 @@ public:
+@@ -86,8 +93,12 @@ public:
    load_func(int64)
  
    // template for functions that store an aligned value to memory
-+      //if (proc && proc->get_state() && proc->get_state()->pc < 0x8000000 && srs->is_on() && !srs->access_check(addr, sizeof(type##_t))) {
++
    #define store_func(type) \
      void store_##type(reg_t addr, type##_t val) { \
-+      if (proc && proc->get_state() && srs->is_on(proc->get_state()->prv) && !srs->access_check(addr, sizeof(type##_t))) {\
-+        srs->print_state(); \
-+        printf("scope violation when storing 0x%08lx, len=%lu, pc=%lx\n", addr, sizeof(type##_t), proc->get_state()->pc); \
-+        srs->turn_off(); \
-+        throw trap_store_access_fault(addr); \
++      if (proc && proc->get_state() && srs->is_on(proc->get_state()->prv) && !srs->access_check(addr, sizeof(type##_t), proc->get_state()->pc)) {\
++        srs->violation(addr, sizeof(type##_t), XSCEN_ACCESS_STORE, proc); \
 +      } \
        if (addr & (sizeof(type##_t)-1)) \
          throw trap_store_address_misaligned(addr); \
        reg_t vpn = addr >> PGSHIFT; \
-@@ -258,6 +276,11 @@ private:
+@@ -258,6 +269,11 @@ private:
    trigger_matched_t *matched_trigger;
  
    friend class processor_t;
@@ -217,18 +283,19 @@ index 34bcf99..f7c1c59 100644
  };
  
  #endif
-diff --git a/riscv/processor.h b/riscv/processor.h
-index 8a9ff47..91cb355 100644
---- a/riscv/processor.h
-+++ b/riscv/processor.h
-@@ -119,6 +119,7 @@ struct state_t
-   reg_t tselect;
-   mcontrol_t mcontrol[num_triggers];
-   reg_t tdata2[num_triggers];
-+  reg_t instcntr;
- 
-   uint32_t fflags;
-   uint32_t frm;
+diff --git a/riscv/riscv.ac b/riscv/riscv.ac
+index 7b48be6..7c825ab 100644
+--- a/riscv/riscv.ac
++++ b/riscv/riscv.ac
+@@ -32,3 +32,8 @@ AC_ARG_ENABLE([histogram], AS_HELP_STRING([--enable-histogram], [Enable PC histo
+ AS_IF([test "x$enable_histogram" = "xyes"], [
+   AC_DEFINE([RISCV_ENABLE_HISTOGRAM],,[Enable PC histogram generation])
+ ])
++
++AC_ARG_ENABLE([pulpino], AS_HELP_STRING([--enable-pulpino], [Enable Pulpino-compatible memory mappings]))
++AS_IF([test "x$enable_pulpino" = "xyes"], [
++  AC_DEFINE([RISCV_ENABLE_PULPINO],,[Enable Pulpino-compatible memory mappings])
++])
 diff --git a/riscv/riscv.mk.in b/riscv/riscv.mk.in
 index 552187a..052b72d 100644
 --- a/riscv/riscv.mk.in
@@ -292,18 +359,19 @@ index b455105..55c066e 100644
  void sim_t::step(size_t n)
 diff --git a/riscv/srs.cc b/riscv/srs.cc
 new file mode 100644
-index 0000000..2f91303
+index 0000000..6d7f8b6
 --- /dev/null
 +++ b/riscv/srs.cc
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,436 @@
 +#include "srs.h"
 +#include "processor.h"
++#include "trap.h"
 +#include <stdio.h>
 +#include <stdlib.h>
 +
 +#define SRS_ASSERT(x, m) if(!(x)){printf("SRS_ASSERT FAILED: " m "\n");print_state();abort();}
 +
-+srs_t::srs_t() : 
++srs_t::srs_t() :
 +  stack_size(0), last_ctx_switch(0), on(false), mode(-1), inst_count{0},
 +  context_switches(0), fast_context_switches(0), access_check_cntr(0) {
 +  bank_a = {0, {(struct srs_entry){0, 0}}};
@@ -312,6 +380,7 @@ index 0000000..2f91303
 +
 +
 +bool srs_t::is_on(reg_t priv) {
++  //printf("is_on: %s && %lu == %lu = %s\n", on?"true":"false", priv, mode, on && (priv == mode) ? "on":"off");
 +  return on && (priv == mode);
 +}
 +
@@ -338,6 +407,7 @@ index 0000000..2f91303
 +  }
 +
 +  stack_size++;
++  printf("STACK: %d\n", stack_size);
 +}
 +
 +void srs_t::pop() {
@@ -383,31 +453,38 @@ index 0000000..2f91303
 +}
 +
 +void srs_t::base(reg_t addr) {
-+  SRS_ASSERT(bank_a.active <= SRS_ENTRIES, "SRBSE: bank A is full");
++  SRS_ASSERT(bank_a.active < SRS_ENTRIES, "SRBSE: bank A is full");
 +  inst_count[SRBSE]++;
 +  unsigned int i = bank_a.active;
 +  bank_a.entries[i].base = addr;
 +}
 +
 +void srs_t::limit(reg_t addr) {
-+  SRS_ASSERT(bank_a.active <= SRS_ENTRIES, "SRLMT: bank A is full");
++  SRS_ASSERT(bank_a.active < SRS_ENTRIES, "SRLMT: bank A is full");
 +  inst_count[SRLMT]++;
 +  unsigned int i = bank_a.active;
 +  bank_a.entries[i].limit = addr;
 +  SRS_ASSERT(bank_a.entries[i].base <= addr, "limit can't be less than base");
 +  bank_a.active++;
++  printf("BANKA: %d\n", bank_a.active);
 +}
 +
 +void srs_t::delegate(reg_t addr) {
 +  inst_count[SRDLG]++;
 +  SRS_ASSERT(bank_a.active > 0, "no active entries in bank A");
 +  SRS_ASSERT(bank_b.active < SRS_ENTRIES, "bank B is already full");
++  if (addr == 0) return;
 +  struct srs_entry *e = find_entry(addr);
++  if (!e && this->enforcing_mode >= XSCEN_MODE_LAX) {
++    printf("DELEGATE: ignore lookup miss in lax mode\n");
++    return;
++  }
 +  SRS_ASSERT(e != NULL, "can't find a matching entry from bank A");
 +  unsigned int i = bank_b.active;
 +  bank_b.entries[i].base = e->base;
 +  bank_b.entries[i].limit = e->limit;
 +  bank_b.active++;
++  printf("BANKB: %d\n", bank_b.active);
 +}
 +
 +void srs_t::delegate_move(reg_t addr) {
@@ -416,6 +493,10 @@ index 0000000..2f91303
 +  SRS_ASSERT(bank_b.active < SRS_ENTRIES, "bank B is already full");
 +
 +  struct srs_entry *e = find_entry(addr);
++  if (!e && this->enforcing_mode >= XSCEN_MODE_LAX) {
++    printf("DELEGATE: ignore lookup miss in lax mode\n");
++    return;
++  }
 +  SRS_ASSERT(e != NULL, "can't find a matching entry from bank A");
 +  SRS_ASSERT(e == &bank_a.entries[bank_a.active-1], "match found, but it's not on the top of the frame");
 +  unsigned int i = bank_b.active;
@@ -423,13 +504,15 @@ index 0000000..2f91303
 +  bank_b.entries[i].limit = e->limit;
 +  bank_b.active++;
 +  bank_a.active--;
++  printf("BANKA: %d\n", bank_a.active);
++  printf("BANKB: %d\n", bank_b.active);
 +}
 +
 +void srs_t::sub(reg_t base, reg_t limit) {
 +  SRS_ASSERT(limit >= base, "SRSUB: limit must be greater than or equal to base");
 +  inst_count[SRSUB]++;
 +  reg_t regsize = limit-base+1;
-+  bool ok = access_check(base, regsize);
++  bool ok = access_check(base, regsize, 0);
 +  SRS_ASSERT(ok, "SRSUB: sub region is not in bounds of any rule");
 +
 +  SRS_ASSERT(bank_a.active <= SRS_ENTRIES, "SRSUB: bank A is full");
@@ -437,11 +520,16 @@ index 0000000..2f91303
 +  bank_a.entries[i].base = base;
 +  bank_a.entries[i].limit = limit;
 +  bank_a.active++;
++  printf("BANKA: %d\n", bank_a.active);
 +}
 +
-+bool srs_t::access_check(reg_t addr, size_t len) {
++bool srs_t::access_check(reg_t addr, size_t len, reg_t pc) {
++  if (this->enforcing_mode == XSCEN_MODE_DEBUG) {
++    printf("  CHECKING ACCESS: addr=%lx len=%lu pc=%lx\n", addr, len, pc);
++    this->print_state();
++  }
 +  if (!on) return true;
-+    access_check_cntr++;
++  access_check_cntr++;
 +
 +  if (bank_a.active == 0) return false;
 +  for (int i = bank_a.active-1; i >= 0; i--) {
@@ -451,6 +539,50 @@ index 0000000..2f91303
 +        addr       >= e.base) return true;
 +  }
 +  return false;
++}
++
++void srs_t::violation(reg_t addr, size_t len, unsigned access, processor_t *proc) {
++  const char *msg;
++  switch (access) {
++    case XSCEN_ACCESS_LOAD:
++      msg = "load";
++      break;
++    case XSCEN_ACCESS_STORE:
++      msg = "store";
++      break;
++    default:
++      SRS_ASSERT(0, "unknown access");
++  }
++
++  this->print_state();
++  printf("scope violation when %s 0x%08lx, len=%lu, pc=%lx\n", msg, addr, len, proc->get_state()->pc);
++  switch (this->enforcing_mode) {
++    case XSCEN_MODE_LAX:
++    case XSCEN_MODE_STRICT:
++      printf("strict mode\n");
++      abort();
++      break;
++    case XSCEN_MODE_DEBUG:
++      printf("debug mode\n");
++      this->turn_off();
++      break;
++    default:
++      SRS_ASSERT(0, "unknown enforcing mode");
++  }
++  switch (access) {
++    case XSCEN_ACCESS_LOAD:
++      throw trap_load_access_fault(addr);
++      break;
++    case XSCEN_ACCESS_STORE:
++      throw trap_store_access_fault(addr);
++      break;
++    default:
++      SRS_ASSERT(0, "unknown access");
++  }
++}
++
++void srs_t::set_enforcing_mode(unsigned enforcing_mode) {
++  this->enforcing_mode = enforcing_mode;
 +}
 +
 +struct srs_entry *srs_t::find_entry(reg_t addr) {
@@ -465,13 +597,9 @@ index 0000000..2f91303
 +  return NULL;
 +}
 +
-+void srs_t::switch_ctx(reg_t cycle, reg_t pc, reg_t instcntr, int instruction) {
-+  //print_state();
-+  ctx_switch_stats.push_back((struct ctx_switch_stat){instruction, bank_a.active, bank_b.active, instcntr});
-+ // abort();
-+  ////printf("context switch at %lu cycles, last at %lu, pc=%lx, instcntr=%lu\n", cycle, last_ctx_switch, pc, instcntr);
++void srs_t::switch_ctx(reg_t cycle, reg_t pc, int instruction) {
++  ctx_switch_stats.push_back((struct ctx_switch_stat){instruction, bank_a.active, bank_b.active, cycle});
 +  if (last_ctx_switch && cycle < last_ctx_switch+SRS_ENTRIES) {
-+    //printf("fast context switch (%lu cycles)\n", cycle-last_ctx_switch);
 +    fast_context_switches++;
 +  }
 +
@@ -489,6 +617,8 @@ index 0000000..2f91303
 +      struct srs_entry e;
 +      e = bank_a.entries[i];
 +      printf("0x%016lx 0x%016lx", e.base, e.limit);
++    } else {
++      printf("%-18s %-18s", "", "");
 +    }
 +    printf("%4s", "");
 +    if (i < bank_b.active) {
@@ -499,10 +629,25 @@ index 0000000..2f91303
 +    printf("\n");
 +  }
 +  printf("\n");
++
++  if (stack_size) {
++    printf("   topmost frame in stack\n");
++    printf("   %-18s %-18s\n", "base", "limit");
++
++    struct srs_frame *topmost = &stack[stack_size-1];
++    for (unsigned int i = 0; i < topmost->count; i++) {
++      printf("%3s", "");
++      struct srs_entry e;
++      e = topmost->entries[i];
++      printf("0x%016lx 0x%016lx", e.base, e.limit);
++      printf("\n");
++    }
++  }
++  printf("\n");
 +}
 +
 +void srs_t::print_stats(processor_t *proc) {
-+  fprintf(stderr, "Total number of instructions executed: %lu\n", proc->get_state()->instcntr);
++  fflush(stdout);
 +  fprintf(stderr, "Cycles reported by CPU: %lu\n", proc->get_state()->minstret);
 +  fprintf(stderr, "Xscen instructions: %u\n", total_instructions());
 +  fprintf(stderr, "  %s: %5u %5u\n", "sbent ", get_inst_count(SBENT), get_cycle_count(SBENT));
@@ -575,14 +720,11 @@ index 0000000..2f91303
 +    if (ctx_switch_stats[i].instruction == SBENT) {
 +      tot_stack += banka;
 +      stackn.push_back(banka);
-+    } else {
++    } else if (!stackn.empty()) {
 +      tot_stack -= stackn.back();
 +      stackn.pop_back();
 +    }
 +    big_stack = big_stack > tot_stack ? big_stack : tot_stack;
-+//    printf("%s %-6u %-6u\n",ctx_switch_stats[i].instruction == SBENT ? "SBENT" : "SBXIT", diff, to_move);
-+//    if (ctx_switch_stats[i].instruction == SBXIT)
-+//      printf("XX %u,%u\n", diff, banka);
 +  }
 +
 +  add_cycles = tot_stall;
@@ -653,12 +795,16 @@ index 0000000..2f91303
 +unsigned int srs_t::get_access_check_cntr() {
 +  return access_check_cntr;
 +}
++
++unsigned int srs_t::get_enforcing_mode() {
++  return enforcing_mode;
++}
 diff --git a/riscv/srs.h b/riscv/srs.h
 new file mode 100644
-index 0000000..c4a00bb
+index 0000000..1900570
 --- /dev/null
 +++ b/riscv/srs.h
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,99 @@
 +#ifndef _RISCV_SRS_H
 +#define _RISCV_SRS_H
 +
@@ -666,9 +812,11 @@ index 0000000..c4a00bb
 +#include "processor.h"
 +#include <vector>
 +
-+#define SRS_STACK_FRAMES 32
-+#define SRS_ENTRIES 32
++#define SRS_STACK_FRAMES 16
++#define SRS_ENTRIES 128
 +
++enum {XSCEN_ACCESS_LOAD, XSCEN_ACCESS_STORE};
++enum {XSCEN_MODE_STRICT, XSCEN_MODE_LAX, XSCEN_MODE_DEBUG};
 +enum {
 +  SBENT,
 +  SRBSE,
@@ -712,6 +860,7 @@ index 0000000..c4a00bb
 +  reg_t last_ctx_switch;
 +  bool on;
 +  reg_t mode;
++  unsigned enforcing_mode;
 +
 +  unsigned int inst_count[7];
 +  unsigned int context_switches;
@@ -731,7 +880,7 @@ index 0000000..c4a00bb
 +  bool is_on(reg_t priv);
 +  void turn_off();
 +  void turn_on(reg_t priv);
-+  bool access_check(reg_t addr, size_t len);
++  bool access_check(reg_t addr, size_t len, reg_t pc);
 +  void enter();
 +  void exit();
 +  void base(reg_t addr);
@@ -739,8 +888,10 @@ index 0000000..c4a00bb
 +  void delegate(reg_t addr);
 +  void delegate_move(reg_t addr);
 +  void sub(reg_t base, reg_t limit);
-+  void switch_ctx(reg_t cycle, reg_t pc, reg_t instcntr, int instruction);
++  void switch_ctx(reg_t cycle, reg_t pc, int instruction);
 +  void print_state();
++  void violation(reg_t addr, size_t len, unsigned access, processor_t *proc);
++  void set_enforcing_mode(unsigned mode);
 +  unsigned int get_inst_count(int instr);
 +  unsigned int get_cycle_count(int instr);
 +  unsigned int total_instructions();
@@ -748,7 +899,1857 @@ index 0000000..c4a00bb
 +  unsigned int get_context_switches();
 +  unsigned int get_fast_context_switches();
 +  unsigned int get_access_check_cntr();
++  unsigned int get_enforcing_mode();
 +  void print_stats(processor_t *proc);
 +};
 +
 +#endif
+diff --git a/riscv/tags b/riscv/tags
+new file mode 100644
+index 0000000..aa38d72
+--- /dev/null
++++ b/riscv/tags
+@@ -0,0 +1,1788 @@
++::ACTION_DEBUG_EXCEPTION	processor.h	48
++::ACTION_DEBUG_MODE	processor.h	49
++::ACTION_TRACE_EMIT	processor.h	52
++::ACTION_TRACE_START	processor.h	50
++::ACTION_TRACE_STOP	processor.h	51
++::CSR_MSTATUS	gdbserver.cc	46
++::GB_ACCESS	gdbserver.h	137
++::GB_HARDWARE	gdbserver.h	134
++::GB_READ	gdbserver.h	136
++::GB_SOFTWARE	gdbserver.h	133
++::GB_WRITE	gdbserver.h	135
++::MATCH_EQUAL	processor.h	57
++::MATCH_GE	processor.h	59
++::MATCH_LT	processor.h	60
++::MATCH_MASK_HIGH	processor.h	62
++::MATCH_MASK_LOW	processor.h	61
++::MATCH_NAPOT	processor.h	58
++::MCONTROL_ACTION_DEBUG_EXCEPTION	processor.h	48
++::MCONTROL_ACTION_DEBUG_MODE	processor.h	49
++::MCONTROL_ACTION_TRACE_EMIT	processor.h	52
++::MCONTROL_ACTION_TRACE_START	processor.h	50
++::MCONTROL_ACTION_TRACE_STOP	processor.h	51
++::MCONTROL_MATCH_EQUAL	processor.h	57
++::MCONTROL_MATCH_GE	processor.h	59
++::MCONTROL_MATCH_LT	processor.h	60
++::MCONTROL_MATCH_MASK_HIGH	processor.h	62
++::MCONTROL_MATCH_MASK_LOW	processor.h	61
++::MCONTROL_MATCH_NAPOT	processor.h	58
++::OPERATION_EXECUTE	processor.h	145
++::OPERATION_LOAD	processor.h	147
++::OPERATION_STORE	processor.h	146
++::REG_CSR0	gdbserver.cc	45
++::REG_CSR0	gdbserver.cc	46
++::REG_CSR4095	gdbserver.cc	47
++::REG_FPR0	gdbserver.cc	43
++::REG_FPR31	gdbserver.cc	44
++::REG_MSTATUS	gdbserver.cc	46
++::REG_PC	gdbserver.cc	42
++::REG_PRIV	gdbserver.cc	48
++::REG_XPR0	gdbserver.cc	40
++::REG_XPR31	gdbserver.cc	41
++::action	processor.h	72
++::cause	processor.h	43
++::chain	processor.h	73
++::dmode	processor.h	68
++::ebreakh	processor.h	39
++::ebreakm	processor.h	38
++::ebreaks	processor.h	40
++::ebreaku	processor.h	41
++::execute	processor.h	79
++::h	processor.h	76
++::halt	processor.h	42
++::load	processor.h	81
++::m	processor.h	75
++::maskmax	processor.h	69
++::match	processor.h	74
++::prv	processor.h	36
++::s	processor.h	77
++::select	processor.h	70
++::step	processor.h	37
++::store	processor.h	80
++::timing	processor.h	71
++::type	processor.h	67
++::u	processor.h	78
++AC_ARG_WITH	riscv.ac	/^AC_ARG_WITH(isa,$/
++BRANCH_TARGET	decode.h	169
++CAUSE_BREAKPOINT	encoding.h	882
++CAUSE_FAULT_FETCH	encoding.h	880
++CAUSE_FAULT_LOAD	encoding.h	884
++CAUSE_FAULT_STORE	encoding.h	886
++CAUSE_HYPERVISOR_ECALL	encoding.h	889
++CAUSE_ILLEGAL_INSTRUCTION	encoding.h	881
++CAUSE_MACHINE_ECALL	encoding.h	890
++CAUSE_MISALIGNED_FETCH	encoding.h	879
++CAUSE_MISALIGNED_LOAD	encoding.h	883
++CAUSE_MISALIGNED_STORE	encoding.h	885
++CAUSE_SUPERVISOR_ECALL	encoding.h	888
++CAUSE_USER_ECALL	encoding.h	887
++CONFIG_STRING_ADDR	encoding.h	132
++CSR_CYCLE	encoding.h	691
++CSR_CYCLEH	encoding.h	816
++CSR_DCSR	encoding.h	747
++CSR_DPC	encoding.h	748
++CSR_DSCRATCH	encoding.h	749
++CSR_FCSR	encoding.h	690
++CSR_FFLAGS	encoding.h	688
++CSR_FRM	encoding.h	689
++CSR_HPMCOUNTER10	encoding.h	701
++CSR_HPMCOUNTER10H	encoding.h	826
++CSR_HPMCOUNTER11	encoding.h	702
++CSR_HPMCOUNTER11H	encoding.h	827
++CSR_HPMCOUNTER12	encoding.h	703
++CSR_HPMCOUNTER12H	encoding.h	828
++CSR_HPMCOUNTER13	encoding.h	704
++CSR_HPMCOUNTER13H	encoding.h	829
++CSR_HPMCOUNTER14	encoding.h	705
++CSR_HPMCOUNTER14H	encoding.h	830
++CSR_HPMCOUNTER15	encoding.h	706
++CSR_HPMCOUNTER15H	encoding.h	831
++CSR_HPMCOUNTER16	encoding.h	707
++CSR_HPMCOUNTER16H	encoding.h	832
++CSR_HPMCOUNTER17	encoding.h	708
++CSR_HPMCOUNTER17H	encoding.h	833
++CSR_HPMCOUNTER18	encoding.h	709
++CSR_HPMCOUNTER18H	encoding.h	834
++CSR_HPMCOUNTER19	encoding.h	710
++CSR_HPMCOUNTER19H	encoding.h	835
++CSR_HPMCOUNTER20	encoding.h	711
++CSR_HPMCOUNTER20H	encoding.h	836
++CSR_HPMCOUNTER21	encoding.h	712
++CSR_HPMCOUNTER21H	encoding.h	837
++CSR_HPMCOUNTER22	encoding.h	713
++CSR_HPMCOUNTER22H	encoding.h	838
++CSR_HPMCOUNTER23	encoding.h	714
++CSR_HPMCOUNTER23H	encoding.h	839
++CSR_HPMCOUNTER24	encoding.h	715
++CSR_HPMCOUNTER24H	encoding.h	840
++CSR_HPMCOUNTER25	encoding.h	716
++CSR_HPMCOUNTER25H	encoding.h	841
++CSR_HPMCOUNTER26	encoding.h	717
++CSR_HPMCOUNTER26H	encoding.h	842
++CSR_HPMCOUNTER27	encoding.h	718
++CSR_HPMCOUNTER27H	encoding.h	843
++CSR_HPMCOUNTER28	encoding.h	719
++CSR_HPMCOUNTER28H	encoding.h	844
++CSR_HPMCOUNTER29	encoding.h	720
++CSR_HPMCOUNTER29H	encoding.h	845
++CSR_HPMCOUNTER3	encoding.h	694
++CSR_HPMCOUNTER30	encoding.h	721
++CSR_HPMCOUNTER30H	encoding.h	846
++CSR_HPMCOUNTER31	encoding.h	722
++CSR_HPMCOUNTER31H	encoding.h	847
++CSR_HPMCOUNTER3H	encoding.h	819
++CSR_HPMCOUNTER4	encoding.h	695
++CSR_HPMCOUNTER4H	encoding.h	820
++CSR_HPMCOUNTER5	encoding.h	696
++CSR_HPMCOUNTER5H	encoding.h	821
++CSR_HPMCOUNTER6	encoding.h	697
++CSR_HPMCOUNTER6H	encoding.h	822
++CSR_HPMCOUNTER7	encoding.h	698
++CSR_HPMCOUNTER7H	encoding.h	823
++CSR_HPMCOUNTER8	encoding.h	699
++CSR_HPMCOUNTER8H	encoding.h	824
++CSR_HPMCOUNTER9	encoding.h	700
++CSR_HPMCOUNTER9H	encoding.h	825
++CSR_INSTRET	encoding.h	693
++CSR_INSTRETH	encoding.h	818
++CSR_MARCHID	encoding.h	813
++CSR_MBADADDR	encoding.h	741
++CSR_MCAUSE	encoding.h	740
++CSR_MCYCLE	encoding.h	750
++CSR_MCYCLEH	encoding.h	848
++CSR_MEDELEG	encoding.h	734
++CSR_MEPC	encoding.h	739
++CSR_MHARTID	encoding.h	815
++CSR_MHPMCOUNTER10	encoding.h	759
++CSR_MHPMCOUNTER10H	encoding.h	857
++CSR_MHPMCOUNTER11	encoding.h	760
++CSR_MHPMCOUNTER11H	encoding.h	858
++CSR_MHPMCOUNTER12	encoding.h	761
++CSR_MHPMCOUNTER12H	encoding.h	859
++CSR_MHPMCOUNTER13	encoding.h	762
++CSR_MHPMCOUNTER13H	encoding.h	860
++CSR_MHPMCOUNTER14	encoding.h	763
++CSR_MHPMCOUNTER14H	encoding.h	861
++CSR_MHPMCOUNTER15	encoding.h	764
++CSR_MHPMCOUNTER15H	encoding.h	862
++CSR_MHPMCOUNTER16	encoding.h	765
++CSR_MHPMCOUNTER16H	encoding.h	863
++CSR_MHPMCOUNTER17	encoding.h	766
++CSR_MHPMCOUNTER17H	encoding.h	864
++CSR_MHPMCOUNTER18	encoding.h	767
++CSR_MHPMCOUNTER18H	encoding.h	865
++CSR_MHPMCOUNTER19	encoding.h	768
++CSR_MHPMCOUNTER19H	encoding.h	866
++CSR_MHPMCOUNTER20	encoding.h	769
++CSR_MHPMCOUNTER20H	encoding.h	867
++CSR_MHPMCOUNTER21	encoding.h	770
++CSR_MHPMCOUNTER21H	encoding.h	868
++CSR_MHPMCOUNTER22	encoding.h	771
++CSR_MHPMCOUNTER22H	encoding.h	869
++CSR_MHPMCOUNTER23	encoding.h	772
++CSR_MHPMCOUNTER23H	encoding.h	870
++CSR_MHPMCOUNTER24	encoding.h	773
++CSR_MHPMCOUNTER24H	encoding.h	871
++CSR_MHPMCOUNTER25	encoding.h	774
++CSR_MHPMCOUNTER25H	encoding.h	872
++CSR_MHPMCOUNTER26	encoding.h	775
++CSR_MHPMCOUNTER26H	encoding.h	873
++CSR_MHPMCOUNTER27	encoding.h	776
++CSR_MHPMCOUNTER27H	encoding.h	874
++CSR_MHPMCOUNTER28	encoding.h	777
++CSR_MHPMCOUNTER28H	encoding.h	875
++CSR_MHPMCOUNTER29	encoding.h	778
++CSR_MHPMCOUNTER29H	encoding.h	876
++CSR_MHPMCOUNTER3	encoding.h	752
++CSR_MHPMCOUNTER30	encoding.h	779
++CSR_MHPMCOUNTER30H	encoding.h	877
++CSR_MHPMCOUNTER31	encoding.h	780
++CSR_MHPMCOUNTER31H	encoding.h	878
++CSR_MHPMCOUNTER3H	encoding.h	850
++CSR_MHPMCOUNTER4	encoding.h	753
++CSR_MHPMCOUNTER4H	encoding.h	851
++CSR_MHPMCOUNTER5	encoding.h	754
++CSR_MHPMCOUNTER5H	encoding.h	852
++CSR_MHPMCOUNTER6	encoding.h	755
++CSR_MHPMCOUNTER6H	encoding.h	853
++CSR_MHPMCOUNTER7	encoding.h	756
++CSR_MHPMCOUNTER7H	encoding.h	854
++CSR_MHPMCOUNTER8	encoding.h	757
++CSR_MHPMCOUNTER8H	encoding.h	855
++CSR_MHPMCOUNTER9	encoding.h	758
++CSR_MHPMCOUNTER9H	encoding.h	856
++CSR_MHPMEVENT10	encoding.h	790
++CSR_MHPMEVENT11	encoding.h	791
++CSR_MHPMEVENT12	encoding.h	792
++CSR_MHPMEVENT13	encoding.h	793
++CSR_MHPMEVENT14	encoding.h	794
++CSR_MHPMEVENT15	encoding.h	795
++CSR_MHPMEVENT16	encoding.h	796
++CSR_MHPMEVENT17	encoding.h	797
++CSR_MHPMEVENT18	encoding.h	798
++CSR_MHPMEVENT19	encoding.h	799
++CSR_MHPMEVENT20	encoding.h	800
++CSR_MHPMEVENT21	encoding.h	801
++CSR_MHPMEVENT22	encoding.h	802
++CSR_MHPMEVENT23	encoding.h	803
++CSR_MHPMEVENT24	encoding.h	804
++CSR_MHPMEVENT25	encoding.h	805
++CSR_MHPMEVENT26	encoding.h	806
++CSR_MHPMEVENT27	encoding.h	807
++CSR_MHPMEVENT28	encoding.h	808
++CSR_MHPMEVENT29	encoding.h	809
++CSR_MHPMEVENT3	encoding.h	783
++CSR_MHPMEVENT30	encoding.h	810
++CSR_MHPMEVENT31	encoding.h	811
++CSR_MHPMEVENT4	encoding.h	784
++CSR_MHPMEVENT5	encoding.h	785
++CSR_MHPMEVENT6	encoding.h	786
++CSR_MHPMEVENT7	encoding.h	787
++CSR_MHPMEVENT8	encoding.h	788
++CSR_MHPMEVENT9	encoding.h	789
++CSR_MIDELEG	encoding.h	735
++CSR_MIE	encoding.h	736
++CSR_MIMPID	encoding.h	814
++CSR_MINSTRET	encoding.h	751
++CSR_MINSTRETH	encoding.h	849
++CSR_MIP	encoding.h	742
++CSR_MISA	encoding.h	733
++CSR_MSCOUNTEREN	encoding.h	782
++CSR_MSCRATCH	encoding.h	738
++CSR_MSTATUS	encoding.h	732
++CSR_MTVEC	encoding.h	737
++CSR_MUCOUNTEREN	encoding.h	781
++CSR_MVENDORID	encoding.h	812
++CSR_SBADADDR	encoding.h	729
++CSR_SCAUSE	encoding.h	728
++CSR_SEPC	encoding.h	727
++CSR_SIE	encoding.h	724
++CSR_SIP	encoding.h	730
++CSR_SPTBR	encoding.h	731
++CSR_SSCRATCH	encoding.h	726
++CSR_SSTATUS	encoding.h	723
++CSR_STVEC	encoding.h	725
++CSR_TDATA1	encoding.h	744
++CSR_TDATA2	encoding.h	745
++CSR_TDATA3	encoding.h	746
++CSR_TIME	encoding.h	692
++CSR_TIMEH	encoding.h	817
++CSR_TSELECT	encoding.h	743
++D	gdbserver.cc	/^#  define D(x) x$/
++D	gdbserver.cc	/^#  define D(x)$/
++DCSR_CAUSE	encoding.h	46
++DCSR_CAUSE_DEBUGINT	encoding.h	55
++DCSR_CAUSE_HALT	encoding.h	57
++DCSR_CAUSE_HWBP	encoding.h	54
++DCSR_CAUSE_NONE	encoding.h	52
++DCSR_CAUSE_STEP	encoding.h	56
++DCSR_CAUSE_SWBP	encoding.h	53
++DCSR_DEBUGINT	encoding.h	47
++DCSR_EBREAKH	encoding.h	41
++DCSR_EBREAKM	encoding.h	40
++DCSR_EBREAKS	encoding.h	42
++DCSR_EBREAKU	encoding.h	43
++DCSR_FULLRESET	encoding.h	39
++DCSR_HALT	encoding.h	48
++DCSR_NDRESET	encoding.h	38
++DCSR_PRV	encoding.h	50
++DCSR_STEP	encoding.h	49
++DCSR_STOPCYCLE	encoding.h	44
++DCSR_STOPTIME	encoding.h	45
++DCSR_XDEBUGVER	encoding.h	37
++DEBUG	gdbserver.cc	24
++DEBUG_CLEARDEBINT	decode.h	237
++DEBUG_END	decode.h	236
++DEBUG_RAM_END	decode.h	235
++DEBUG_RAM_SIZE	decode.h	234
++DEBUG_RAM_START	decode.h	233
++DEBUG_ROM_END	decode.h	232
++DEBUG_ROM_EXCEPTION	decode.h	231
++DEBUG_ROM_RESUME	decode.h	230
++DEBUG_ROM_START	decode.h	229
++DEBUG_SETHALTNOT	decode.h	238
++DEBUG_SIZE	decode.h	239
++DEBUG_START	decode.h	228
++DECLARE_CAUSE	processor.cc	/^#define DECLARE_CAUSE(name, value) mask |= 1ULL <</
++DECLARE_CAUSE	processor.cc	350
++DECLARE_CSR	interactive.cc	/^      #define DECLARE_CSR(name, number) if (args[1/
++DECLARE_CSR	interactive.cc	190
++DECLARE_INSN	encoding.h	/^DECLARE_INSN(beq, MATCH_BEQ, MASK_BEQ)$/
++DECLARE_INSN	processor.cc	/^  #define DECLARE_INSN(name, match, mask) \\$/
++DECLARE_INSN	processor.cc	688
++DECLARE_MEM_TRAP	trap.h	/^#define DECLARE_MEM_TRAP(n, x) class trap_##x : pu/
++DECLARE_TRAP	trap.h	/^#define DECLARE_TRAP(n, x) class trap_##x : public/
++DEFAULT_MTVEC	encoding.h	131
++DEFAULT_NMIVEC	encoding.h	130
++DEFAULT_RSTVEC	encoding.h	129
++DEFINE_INSN	processor.cc	/^  #define DEFINE_INSN(name) \\$/
++DEFINE_INSN	processor.cc	693
++DO_WRITE_FREG	decode.h	/^#define DO_WRITE_FREG(reg, value) (STATE.FPR.write/
++DRAM_BASE	encoding.h	134
++EXT_IO_BASE	encoding.h	133
++FETCH	memtracer.h	13
++FPEXC_DZ	decode.h	41
++FPEXC_NV	decode.h	42
++FPEXC_NX	decode.h	38
++FPEXC_OF	decode.h	40
++FPEXC_UF	decode.h	39
++FP_RD_0	decode.h	30
++FP_RD_DN	decode.h	31
++FP_RD_NE	decode.h	29
++FP_RD_NMM	decode.h	33
++FP_RD_UP	decode.h	32
++FRS1	decode.h	160
++FRS2	decode.h	161
++FRS3	decode.h	162
++FSR_AEXC	decode.h	50
++FSR_AEXC_SHIFT	decode.h	44
++FSR_DZA	decode.h	48
++FSR_NVA	decode.h	45
++FSR_NXA	decode.h	49
++FSR_OFA	decode.h	46
++FSR_RD	decode.h	36
++FSR_RD_SHIFT	decode.h	35
++FSR_UFA	decode.h	47
++ICACHE_ACCESS	execute.cc	/^        #define ICACHE_ACCESS(i) { \\$/
++IRQ_COP	encoding.h	126
++IRQ_HOST	encoding.h	127
++IRQ_H_EXT	encoding.h	124
++IRQ_H_SOFT	encoding.h	118
++IRQ_H_TIMER	encoding.h	121
++IRQ_M_EXT	encoding.h	125
++IRQ_M_SOFT	encoding.h	119
++IRQ_M_TIMER	encoding.h	122
++IRQ_S_EXT	encoding.h	123
++IRQ_S_SOFT	encoding.h	117
++IRQ_S_TIMER	encoding.h	120
++JUMP_TARGET	decode.h	170
++LOAD	memtracer.h	11
++MASK_ADD	encoding.h	253
++MASK_ADDI	encoding.h	235
++MASK_ADDIW	encoding.h	273
++MASK_ADDW	encoding.h	281
++MASK_AMOADD_D	encoding.h	365
++MASK_AMOADD_W	encoding.h	343
++MASK_AMOAND_D	encoding.h	371
++MASK_AMOAND_W	encoding.h	349
++MASK_AMOMAXU_D	encoding.h	379
++MASK_AMOMAXU_W	encoding.h	357
++MASK_AMOMAX_D	encoding.h	375
++MASK_AMOMAX_W	encoding.h	353
++MASK_AMOMINU_D	encoding.h	377
++MASK_AMOMINU_W	encoding.h	355
++MASK_AMOMIN_D	encoding.h	373
++MASK_AMOMIN_W	encoding.h	351
++MASK_AMOOR_D	encoding.h	369
++MASK_AMOOR_W	encoding.h	347
++MASK_AMOSWAP_D	encoding.h	381
++MASK_AMOSWAP_W	encoding.h	359
++MASK_AMOXOR_D	encoding.h	367
++MASK_AMOXOR_W	encoding.h	345
++MASK_AND	encoding.h	271
++MASK_ANDI	encoding.h	251
++MASK_AUIPC	encoding.h	233
++MASK_BEQ	encoding.h	215
++MASK_BGE	encoding.h	221
++MASK_BGEU	encoding.h	225
++MASK_BLT	encoding.h	219
++MASK_BLTU	encoding.h	223
++MASK_BNE	encoding.h	217
++MASK_CSRRC	encoding.h	409
++MASK_CSRRCI	encoding.h	415
++MASK_CSRRS	encoding.h	407
++MASK_CSRRSI	encoding.h	413
++MASK_CSRRW	encoding.h	405
++MASK_CSRRWI	encoding.h	411
++MASK_CUSTOM0	encoding.h	625
++MASK_CUSTOM0_RD	encoding.h	631
++MASK_CUSTOM0_RD_RS1	encoding.h	633
++MASK_CUSTOM0_RD_RS1_RS2	encoding.h	635
++MASK_CUSTOM0_RS1	encoding.h	627
++MASK_CUSTOM0_RS1_RS2	encoding.h	629
++MASK_CUSTOM1	encoding.h	637
++MASK_CUSTOM1_RD	encoding.h	643
++MASK_CUSTOM1_RD_RS1	encoding.h	645
++MASK_CUSTOM1_RD_RS1_RS2	encoding.h	647
++MASK_CUSTOM1_RS1	encoding.h	639
++MASK_CUSTOM1_RS1_RS2	encoding.h	641
++MASK_CUSTOM2	encoding.h	649
++MASK_CUSTOM2_RD	encoding.h	655
++MASK_CUSTOM2_RD_RS1	encoding.h	657
++MASK_CUSTOM2_RD_RS1_RS2	encoding.h	659
++MASK_CUSTOM2_RS1	encoding.h	651
++MASK_CUSTOM2_RS1_RS2	encoding.h	653
++MASK_CUSTOM3	encoding.h	661
++MASK_CUSTOM3_RD	encoding.h	667
++MASK_CUSTOM3_RD_RS1	encoding.h	669
++MASK_CUSTOM3_RD_RS1_RS2	encoding.h	671
++MASK_CUSTOM3_RS1	encoding.h	663
++MASK_CUSTOM3_RS1_RS2	encoding.h	665
++MASK_C_ADD	encoding.h	617
++MASK_C_ADDI	encoding.h	575
++MASK_C_ADDI16SP	encoding.h	543
++MASK_C_ADDI4SPN	encoding.h	561
++MASK_C_ADDIW	encoding.h	555
++MASK_C_ADDW	encoding.h	599
++MASK_C_AND	encoding.h	595
++MASK_C_ANDI	encoding.h	587
++MASK_C_BEQZ	encoding.h	603
++MASK_C_BNEZ	encoding.h	605
++MASK_C_EBREAK	encoding.h	549
++MASK_C_FLD	encoding.h	563
++MASK_C_FLDSP	encoding.h	609
++MASK_C_FLW	encoding.h	567
++MASK_C_FLWSP	encoding.h	613
++MASK_C_FSD	encoding.h	569
++MASK_C_FSDSP	encoding.h	619
++MASK_C_FSW	encoding.h	573
++MASK_C_FSWSP	encoding.h	623
++MASK_C_J	encoding.h	601
++MASK_C_JAL	encoding.h	577
++MASK_C_JALR	encoding.h	547
++MASK_C_JR	encoding.h	545
++MASK_C_LD	encoding.h	551
++MASK_C_LDSP	encoding.h	557
++MASK_C_LI	encoding.h	579
++MASK_C_LUI	encoding.h	581
++MASK_C_LW	encoding.h	565
++MASK_C_LWSP	encoding.h	611
++MASK_C_MV	encoding.h	615
++MASK_C_NOP	encoding.h	541
++MASK_C_OR	encoding.h	593
++MASK_C_SD	encoding.h	553
++MASK_C_SDSP	encoding.h	559
++MASK_C_SLLI	encoding.h	607
++MASK_C_SRAI	encoding.h	585
++MASK_C_SRLI	encoding.h	583
++MASK_C_SUB	encoding.h	589
++MASK_C_SUBW	encoding.h	597
++MASK_C_SW	encoding.h	571
++MASK_C_SWSP	encoding.h	621
++MASK_C_XOR	encoding.h	591
++MASK_DIV	encoding.h	325
++MASK_DIVU	encoding.h	327
++MASK_DIVUW	encoding.h	337
++MASK_DIVW	encoding.h	335
++MASK_DRET	encoding.h	399
++MASK_EBREAK	encoding.h	389
++MASK_ECALL	encoding.h	387
++MASK_FADD_D	encoding.h	437
++MASK_FADD_S	encoding.h	417
++MASK_FCLASS_D	encoding.h	495
++MASK_FCLASS_S	encoding.h	483
++MASK_FCVT_D_L	encoding.h	511
++MASK_FCVT_D_LU	encoding.h	513
++MASK_FCVT_D_S	encoding.h	457
++MASK_FCVT_D_W	encoding.h	507
++MASK_FCVT_D_WU	encoding.h	509
++MASK_FCVT_LU_D	encoding.h	491
++MASK_FCVT_LU_S	encoding.h	479
++MASK_FCVT_L_D	encoding.h	489
++MASK_FCVT_L_S	encoding.h	477
++MASK_FCVT_S_D	encoding.h	455
++MASK_FCVT_S_L	encoding.h	501
++MASK_FCVT_S_LU	encoding.h	503
++MASK_FCVT_S_W	encoding.h	497
++MASK_FCVT_S_WU	encoding.h	499
++MASK_FCVT_WU_D	encoding.h	487
++MASK_FCVT_WU_S	encoding.h	475
++MASK_FCVT_W_D	encoding.h	485
++MASK_FCVT_W_S	encoding.h	473
++MASK_FDIV_D	encoding.h	443
++MASK_FDIV_S	encoding.h	423
++MASK_FENCE	encoding.h	313
++MASK_FENCE_I	encoding.h	315
++MASK_FEQ_D	encoding.h	471
++MASK_FEQ_S	encoding.h	465
++MASK_FLD	encoding.h	519
++MASK_FLE_D	encoding.h	467
++MASK_FLE_S	encoding.h	461
++MASK_FLT_D	encoding.h	469
++MASK_FLT_S	encoding.h	463
++MASK_FLW	encoding.h	517
++MASK_FMADD_D	encoding.h	533
++MASK_FMADD_S	encoding.h	525
++MASK_FMAX_D	encoding.h	453
++MASK_FMAX_S	encoding.h	433
++MASK_FMIN_D	encoding.h	451
++MASK_FMIN_S	encoding.h	431
++MASK_FMSUB_D	encoding.h	535
++MASK_FMSUB_S	encoding.h	527
++MASK_FMUL_D	encoding.h	441
++MASK_FMUL_S	encoding.h	421
++MASK_FMV_D_X	encoding.h	515
++MASK_FMV_S_X	encoding.h	505
++MASK_FMV_X_D	encoding.h	493
++MASK_FMV_X_S	encoding.h	481
++MASK_FNMADD_D	encoding.h	539
++MASK_FNMADD_S	encoding.h	531
++MASK_FNMSUB_D	encoding.h	537
++MASK_FNMSUB_S	encoding.h	529
++MASK_FSD	encoding.h	523
++MASK_FSGNJN_D	encoding.h	447
++MASK_FSGNJN_S	encoding.h	427
++MASK_FSGNJX_D	encoding.h	449
++MASK_FSGNJX_S	encoding.h	429
++MASK_FSGNJ_D	encoding.h	445
++MASK_FSGNJ_S	encoding.h	425
++MASK_FSQRT_D	encoding.h	459
++MASK_FSQRT_S	encoding.h	435
++MASK_FSUB_D	encoding.h	439
++MASK_FSUB_S	encoding.h	419
++MASK_FSW	encoding.h	521
++MASK_HRET	encoding.h	395
++MASK_JAL	encoding.h	229
++MASK_JALR	encoding.h	227
++MASK_LB	encoding.h	291
++MASK_LBU	encoding.h	299
++MASK_LD	encoding.h	297
++MASK_LH	encoding.h	293
++MASK_LHU	encoding.h	301
++MASK_LR_D	encoding.h	383
++MASK_LR_W	encoding.h	361
++MASK_LUI	encoding.h	231
++MASK_LW	encoding.h	295
++MASK_LWU	encoding.h	303
++MASK_MRET	encoding.h	397
++MASK_MUL	encoding.h	317
++MASK_MULH	encoding.h	319
++MASK_MULHSU	encoding.h	321
++MASK_MULHU	encoding.h	323
++MASK_MULW	encoding.h	333
++MASK_OR	encoding.h	269
++MASK_ORI	encoding.h	249
++MASK_REM	encoding.h	329
++MASK_REMU	encoding.h	331
++MASK_REMUW	encoding.h	341
++MASK_REMW	encoding.h	339
++MASK_SB	encoding.h	305
++MASK_SC_D	encoding.h	385
++MASK_SC_W	encoding.h	363
++MASK_SD	encoding.h	311
++MASK_SFENCE_VM	encoding.h	401
++MASK_SH	encoding.h	307
++MASK_SLL	encoding.h	257
++MASK_SLLI	encoding.h	237
++MASK_SLLIW	encoding.h	275
++MASK_SLLW	encoding.h	285
++MASK_SLT	encoding.h	259
++MASK_SLTI	encoding.h	239
++MASK_SLTIU	encoding.h	241
++MASK_SLTU	encoding.h	261
++MASK_SRA	encoding.h	267
++MASK_SRAI	encoding.h	247
++MASK_SRAIW	encoding.h	279
++MASK_SRAW	encoding.h	289
++MASK_SRET	encoding.h	393
++MASK_SRL	encoding.h	265
++MASK_SRLI	encoding.h	245
++MASK_SRLIW	encoding.h	277
++MASK_SRLW	encoding.h	287
++MASK_SUB	encoding.h	255
++MASK_SUBW	encoding.h	283
++MASK_SW	encoding.h	309
++MASK_URET	encoding.h	391
++MASK_WFI	encoding.h	403
++MASK_XOR	encoding.h	263
++MASK_XORI	encoding.h	243
++MASK_XSCEN_SBENT	encoding.h	674
++MASK_XSCEN_SBXIT	encoding.h	684
++MASK_XSCEN_SRBSE	encoding.h	676
++MASK_XSCEN_SRDLG	encoding.h	680
++MASK_XSCEN_SRDLGM	encoding.h	682
++MASK_XSCEN_SRLMT	encoding.h	678
++MASK_XSCEN_SRSUB	encoding.h	686
++MATCH_ADD	encoding.h	252
++MATCH_ADDI	encoding.h	234
++MATCH_ADDIW	encoding.h	272
++MATCH_ADDW	encoding.h	280
++MATCH_AMOADD_D	encoding.h	364
++MATCH_AMOADD_W	encoding.h	342
++MATCH_AMOAND_D	encoding.h	370
++MATCH_AMOAND_W	encoding.h	348
++MATCH_AMOMAXU_D	encoding.h	378
++MATCH_AMOMAXU_W	encoding.h	356
++MATCH_AMOMAX_D	encoding.h	374
++MATCH_AMOMAX_W	encoding.h	352
++MATCH_AMOMINU_D	encoding.h	376
++MATCH_AMOMINU_W	encoding.h	354
++MATCH_AMOMIN_D	encoding.h	372
++MATCH_AMOMIN_W	encoding.h	350
++MATCH_AMOOR_D	encoding.h	368
++MATCH_AMOOR_W	encoding.h	346
++MATCH_AMOSWAP_D	encoding.h	380
++MATCH_AMOSWAP_W	encoding.h	358
++MATCH_AMOXOR_D	encoding.h	366
++MATCH_AMOXOR_W	encoding.h	344
++MATCH_AND	encoding.h	270
++MATCH_ANDI	encoding.h	250
++MATCH_AUIPC	encoding.h	232
++MATCH_BEQ	encoding.h	214
++MATCH_BGE	encoding.h	220
++MATCH_BGEU	encoding.h	224
++MATCH_BLT	encoding.h	218
++MATCH_BLTU	encoding.h	222
++MATCH_BNE	encoding.h	216
++MATCH_CSRRC	encoding.h	408
++MATCH_CSRRCI	encoding.h	414
++MATCH_CSRRS	encoding.h	406
++MATCH_CSRRSI	encoding.h	412
++MATCH_CSRRW	encoding.h	404
++MATCH_CSRRWI	encoding.h	410
++MATCH_CUSTOM0	encoding.h	624
++MATCH_CUSTOM0_RD	encoding.h	630
++MATCH_CUSTOM0_RD_RS1	encoding.h	632
++MATCH_CUSTOM0_RD_RS1_RS2	encoding.h	634
++MATCH_CUSTOM0_RS1	encoding.h	626
++MATCH_CUSTOM0_RS1_RS2	encoding.h	628
++MATCH_CUSTOM1	encoding.h	636
++MATCH_CUSTOM1_RD	encoding.h	642
++MATCH_CUSTOM1_RD_RS1	encoding.h	644
++MATCH_CUSTOM1_RD_RS1_RS2	encoding.h	646
++MATCH_CUSTOM1_RS1	encoding.h	638
++MATCH_CUSTOM1_RS1_RS2	encoding.h	640
++MATCH_CUSTOM2	encoding.h	648
++MATCH_CUSTOM2_RD	encoding.h	654
++MATCH_CUSTOM2_RD_RS1	encoding.h	656
++MATCH_CUSTOM2_RD_RS1_RS2	encoding.h	658
++MATCH_CUSTOM2_RS1	encoding.h	650
++MATCH_CUSTOM2_RS1_RS2	encoding.h	652
++MATCH_CUSTOM3	encoding.h	660
++MATCH_CUSTOM3_RD	encoding.h	666
++MATCH_CUSTOM3_RD_RS1	encoding.h	668
++MATCH_CUSTOM3_RD_RS1_RS2	encoding.h	670
++MATCH_CUSTOM3_RS1	encoding.h	662
++MATCH_CUSTOM3_RS1_RS2	encoding.h	664
++MATCH_C_ADD	encoding.h	616
++MATCH_C_ADDI	encoding.h	574
++MATCH_C_ADDI16SP	encoding.h	542
++MATCH_C_ADDI4SPN	encoding.h	560
++MATCH_C_ADDIW	encoding.h	554
++MATCH_C_ADDW	encoding.h	598
++MATCH_C_AND	encoding.h	594
++MATCH_C_ANDI	encoding.h	586
++MATCH_C_BEQZ	encoding.h	602
++MATCH_C_BNEZ	encoding.h	604
++MATCH_C_EBREAK	encoding.h	548
++MATCH_C_FLD	encoding.h	562
++MATCH_C_FLDSP	encoding.h	608
++MATCH_C_FLW	encoding.h	566
++MATCH_C_FLWSP	encoding.h	612
++MATCH_C_FSD	encoding.h	568
++MATCH_C_FSDSP	encoding.h	618
++MATCH_C_FSW	encoding.h	572
++MATCH_C_FSWSP	encoding.h	622
++MATCH_C_J	encoding.h	600
++MATCH_C_JAL	encoding.h	576
++MATCH_C_JALR	encoding.h	546
++MATCH_C_JR	encoding.h	544
++MATCH_C_LD	encoding.h	550
++MATCH_C_LDSP	encoding.h	556
++MATCH_C_LI	encoding.h	578
++MATCH_C_LUI	encoding.h	580
++MATCH_C_LW	encoding.h	564
++MATCH_C_LWSP	encoding.h	610
++MATCH_C_MV	encoding.h	614
++MATCH_C_NOP	encoding.h	540
++MATCH_C_OR	encoding.h	592
++MATCH_C_SD	encoding.h	552
++MATCH_C_SDSP	encoding.h	558
++MATCH_C_SLLI	encoding.h	606
++MATCH_C_SRAI	encoding.h	584
++MATCH_C_SRLI	encoding.h	582
++MATCH_C_SUB	encoding.h	588
++MATCH_C_SUBW	encoding.h	596
++MATCH_C_SW	encoding.h	570
++MATCH_C_SWSP	encoding.h	620
++MATCH_C_XOR	encoding.h	590
++MATCH_DIV	encoding.h	324
++MATCH_DIVU	encoding.h	326
++MATCH_DIVUW	encoding.h	336
++MATCH_DIVW	encoding.h	334
++MATCH_DRET	encoding.h	398
++MATCH_EBREAK	encoding.h	388
++MATCH_ECALL	encoding.h	386
++MATCH_FADD_D	encoding.h	436
++MATCH_FADD_S	encoding.h	416
++MATCH_FCLASS_D	encoding.h	494
++MATCH_FCLASS_S	encoding.h	482
++MATCH_FCVT_D_L	encoding.h	510
++MATCH_FCVT_D_LU	encoding.h	512
++MATCH_FCVT_D_S	encoding.h	456
++MATCH_FCVT_D_W	encoding.h	506
++MATCH_FCVT_D_WU	encoding.h	508
++MATCH_FCVT_LU_D	encoding.h	490
++MATCH_FCVT_LU_S	encoding.h	478
++MATCH_FCVT_L_D	encoding.h	488
++MATCH_FCVT_L_S	encoding.h	476
++MATCH_FCVT_S_D	encoding.h	454
++MATCH_FCVT_S_L	encoding.h	500
++MATCH_FCVT_S_LU	encoding.h	502
++MATCH_FCVT_S_W	encoding.h	496
++MATCH_FCVT_S_WU	encoding.h	498
++MATCH_FCVT_WU_D	encoding.h	486
++MATCH_FCVT_WU_S	encoding.h	474
++MATCH_FCVT_W_D	encoding.h	484
++MATCH_FCVT_W_S	encoding.h	472
++MATCH_FDIV_D	encoding.h	442
++MATCH_FDIV_S	encoding.h	422
++MATCH_FENCE	encoding.h	312
++MATCH_FENCE_I	encoding.h	314
++MATCH_FEQ_D	encoding.h	470
++MATCH_FEQ_S	encoding.h	464
++MATCH_FLD	encoding.h	518
++MATCH_FLE_D	encoding.h	466
++MATCH_FLE_S	encoding.h	460
++MATCH_FLT_D	encoding.h	468
++MATCH_FLT_S	encoding.h	462
++MATCH_FLW	encoding.h	516
++MATCH_FMADD_D	encoding.h	532
++MATCH_FMADD_S	encoding.h	524
++MATCH_FMAX_D	encoding.h	452
++MATCH_FMAX_S	encoding.h	432
++MATCH_FMIN_D	encoding.h	450
++MATCH_FMIN_S	encoding.h	430
++MATCH_FMSUB_D	encoding.h	534
++MATCH_FMSUB_S	encoding.h	526
++MATCH_FMUL_D	encoding.h	440
++MATCH_FMUL_S	encoding.h	420
++MATCH_FMV_D_X	encoding.h	514
++MATCH_FMV_S_X	encoding.h	504
++MATCH_FMV_X_D	encoding.h	492
++MATCH_FMV_X_S	encoding.h	480
++MATCH_FNMADD_D	encoding.h	538
++MATCH_FNMADD_S	encoding.h	530
++MATCH_FNMSUB_D	encoding.h	536
++MATCH_FNMSUB_S	encoding.h	528
++MATCH_FSD	encoding.h	522
++MATCH_FSGNJN_D	encoding.h	446
++MATCH_FSGNJN_S	encoding.h	426
++MATCH_FSGNJX_D	encoding.h	448
++MATCH_FSGNJX_S	encoding.h	428
++MATCH_FSGNJ_D	encoding.h	444
++MATCH_FSGNJ_S	encoding.h	424
++MATCH_FSQRT_D	encoding.h	458
++MATCH_FSQRT_S	encoding.h	434
++MATCH_FSUB_D	encoding.h	438
++MATCH_FSUB_S	encoding.h	418
++MATCH_FSW	encoding.h	520
++MATCH_HRET	encoding.h	394
++MATCH_JAL	encoding.h	228
++MATCH_JALR	encoding.h	226
++MATCH_LB	encoding.h	290
++MATCH_LBU	encoding.h	298
++MATCH_LD	encoding.h	296
++MATCH_LH	encoding.h	292
++MATCH_LHU	encoding.h	300
++MATCH_LR_D	encoding.h	382
++MATCH_LR_W	encoding.h	360
++MATCH_LUI	encoding.h	230
++MATCH_LW	encoding.h	294
++MATCH_LWU	encoding.h	302
++MATCH_MRET	encoding.h	396
++MATCH_MUL	encoding.h	316
++MATCH_MULH	encoding.h	318
++MATCH_MULHSU	encoding.h	320
++MATCH_MULHU	encoding.h	322
++MATCH_MULW	encoding.h	332
++MATCH_OR	encoding.h	268
++MATCH_ORI	encoding.h	248
++MATCH_REM	encoding.h	328
++MATCH_REMU	encoding.h	330
++MATCH_REMUW	encoding.h	340
++MATCH_REMW	encoding.h	338
++MATCH_SB	encoding.h	304
++MATCH_SC_D	encoding.h	384
++MATCH_SC_W	encoding.h	362
++MATCH_SD	encoding.h	310
++MATCH_SFENCE_VM	encoding.h	400
++MATCH_SH	encoding.h	306
++MATCH_SLL	encoding.h	256
++MATCH_SLLI	encoding.h	236
++MATCH_SLLIW	encoding.h	274
++MATCH_SLLW	encoding.h	284
++MATCH_SLT	encoding.h	258
++MATCH_SLTI	encoding.h	238
++MATCH_SLTIU	encoding.h	240
++MATCH_SLTU	encoding.h	260
++MATCH_SRA	encoding.h	266
++MATCH_SRAI	encoding.h	246
++MATCH_SRAIW	encoding.h	278
++MATCH_SRAW	encoding.h	288
++MATCH_SRET	encoding.h	392
++MATCH_SRL	encoding.h	264
++MATCH_SRLI	encoding.h	244
++MATCH_SRLIW	encoding.h	276
++MATCH_SRLW	encoding.h	286
++MATCH_SUB	encoding.h	254
++MATCH_SUBW	encoding.h	282
++MATCH_SW	encoding.h	308
++MATCH_URET	encoding.h	390
++MATCH_WFI	encoding.h	402
++MATCH_XOR	encoding.h	262
++MATCH_XORI	encoding.h	242
++MATCH_XSCEN_SBENT	encoding.h	673
++MATCH_XSCEN_SBXIT	encoding.h	683
++MATCH_XSCEN_SRBSE	encoding.h	675
++MATCH_XSCEN_SRDLG	encoding.h	679
++MATCH_XSCEN_SRDLGM	encoding.h	681
++MATCH_XSCEN_SRLMT	encoding.h	677
++MATCH_XSCEN_SRSUB	encoding.h	685
++MAX_INSN_LENGTH	decode.h	57
++MCONTROL_ACTION	encoding.h	65
++MCONTROL_ACTION_DEBUG_EXCEPTION	encoding.h	79
++MCONTROL_ACTION_DEBUG_MODE	encoding.h	80
++MCONTROL_ACTION_TRACE_EMIT	encoding.h	83
++MCONTROL_ACTION_TRACE_START	encoding.h	81
++MCONTROL_ACTION_TRACE_STOP	encoding.h	82
++MCONTROL_CHAIN	encoding.h	66
++MCONTROL_DMODE	encoding.h	/^#define MCONTROL_DMODE(xlen)   (1ULL<<((xlen)-5))$/
++MCONTROL_EXECUTE	encoding.h	72
++MCONTROL_H	encoding.h	69
++MCONTROL_LOAD	encoding.h	74
++MCONTROL_M	encoding.h	68
++MCONTROL_MASKMAX	encoding.h	/^#define MCONTROL_MASKMAX(xlen) (0x3fULL<<((xlen)-1/
++MCONTROL_MATCH	encoding.h	67
++MCONTROL_MATCH_EQUAL	encoding.h	85
++MCONTROL_MATCH_GE	encoding.h	87
++MCONTROL_MATCH_LT	encoding.h	88
++MCONTROL_MATCH_MASK_HIGH	encoding.h	90
++MCONTROL_MATCH_MASK_LOW	encoding.h	89
++MCONTROL_MATCH_NAPOT	encoding.h	86
++MCONTROL_S	encoding.h	70
++MCONTROL_SELECT	encoding.h	63
++MCONTROL_STORE	encoding.h	73
++MCONTROL_TIMING	encoding.h	64
++MCONTROL_TYPE	encoding.h	/^#define MCONTROL_TYPE(xlen)    (0xfULL<<((xlen)-4)/
++MCONTROL_TYPE_MATCH	encoding.h	77
++MCONTROL_TYPE_NONE	encoding.h	76
++MCONTROL_U	encoding.h	71
++MIP_HEIP	encoding.h	99
++MIP_HSIP	encoding.h	93
++MIP_HTIP	encoding.h	96
++MIP_MEIP	encoding.h	100
++MIP_MSIP	encoding.h	94
++MIP_MTIP	encoding.h	97
++MIP_SEIP	encoding.h	98
++MIP_SSIP	encoding.h	92
++MIP_STIP	encoding.h	95
++MMU	decode.h	123
++MSTATUS32_SD	encoding.h	23
++MSTATUS64_SD	encoding.h	24
++MSTATUS_FS	encoding.h	17
++MSTATUS_HIE	encoding.h	8
++MSTATUS_HPIE	encoding.h	12
++MSTATUS_HPP	encoding.h	15
++MSTATUS_MIE	encoding.h	9
++MSTATUS_MPIE	encoding.h	13
++MSTATUS_MPP	encoding.h	16
++MSTATUS_MPRV	encoding.h	19
++MSTATUS_MXR	encoding.h	21
++MSTATUS_PUM	encoding.h	20
++MSTATUS_SD	encoding.h	154
++MSTATUS_SD	encoding.h	158
++MSTATUS_SIE	encoding.h	7
++MSTATUS_SPIE	encoding.h	11
++MSTATUS_SPP	encoding.h	14
++MSTATUS_UIE	encoding.h	6
++MSTATUS_UPIE	encoding.h	10
++MSTATUS_VM	encoding.h	22
++MSTATUS_XS	encoding.h	18
++N	decode.h	105
++NCSR	decode.h	24
++NFPR	decode.h	23
++NXPR	decode.h	22
++PC_ALIGN	decode.h	58
++PC_SERIALIZE_AFTER	decode.h	212
++PC_SERIALIZE_BEFORE	decode.h	211
++PGMASK	mmu.h	21
++PGSHIFT	mmu.h	19
++PGSIZE	mmu.h	20
++PRV_H	encoding.h	107
++PRV_M	encoding.h	108
++PRV_S	encoding.h	106
++PRV_U	encoding.h	105
++PTE_A	encoding.h	143
++PTE_D	encoding.h	144
++PTE_G	encoding.h	142
++PTE_PPN_SHIFT	encoding.h	147
++PTE_R	encoding.h	138
++PTE_SOFT	encoding.h	145
++PTE_TABLE	encoding.h	/^#define PTE_TABLE(PTE) (((PTE) & (PTE_V | PTE_R | /
++PTE_U	encoding.h	141
++PTE_V	encoding.h	137
++PTE_W	encoding.h	139
++PTE_X	encoding.h	140
++READ_FREG	decode.h	/^#define READ_FREG(reg) STATE.FPR[reg]$/
++READ_REG	decode.h	/^#define READ_REG(reg) STATE.XPR[reg]$/
++REGISTER_EXTENSION	extension.h	/^#define REGISTER_EXTENSION(name, constructor) \\$/
++REGISTER_INSN	processor.h	/^#define REGISTER_INSN(proc, name, match, mask) \\$/
++RISCV_CSR_ENCODING_H	encoding.h	4
++RISCV_ENCODING_H	encoding.h	213
++RISCV_PGLEVEL_BITS	encoding.h	156
++RISCV_PGLEVEL_BITS	encoding.h	160
++RISCV_PGSHIFT	encoding.h	162
++RISCV_PGSIZE	encoding.h	163
++RM	decode.h	171
++RS1	decode.h	127
++RS2	decode.h	128
++RVC_FRS2	decode.h	155
++RVC_FRS2S	decode.h	156
++RVC_RS1	decode.h	151
++RVC_RS1S	decode.h	153
++RVC_RS2	decode.h	152
++RVC_RS2S	decode.h	154
++RVC_SP	decode.h	157
++S0	gdbserver.cc	58
++S1	gdbserver.cc	59
++SBENT	srs.h	12
++SBXIT	srs.h	17
++SHAMT	decode.h	168
++SIP_SSIP	encoding.h	102
++SIP_STIP	encoding.h	103
++SRBSE	srs.h	13
++SRDLG	srs.h	15
++SRDLGM	srs.h	16
++SRLMT	srs.h	14
++SRSUB	srs.h	18
++SRS_ASSERT	srs.cc	/^#define SRS_ASSERT(x, m) if(!(x)){printf("SRS_ASSE/
++SRS_ENTRIES	srs.h	9
++SRS_STACK_FRAMES	srs.h	8
++SSTATUS32_SD	encoding.h	34
++SSTATUS64_SD	encoding.h	35
++SSTATUS_FS	encoding.h	31
++SSTATUS_PUM	encoding.h	33
++SSTATUS_SD	encoding.h	155
++SSTATUS_SD	encoding.h	159
++SSTATUS_SIE	encoding.h	27
++SSTATUS_SPIE	encoding.h	29
++SSTATUS_SPP	encoding.h	30
++SSTATUS_UIE	encoding.h	26
++SSTATUS_UPIE	encoding.h	28
++SSTATUS_XS	encoding.h	32
++STATE	decode.h	124
++STATE	processor.cc	20
++STATE	processor.cc	21
++STORE	memtracer.h	12
++VM_MBARE	encoding.h	110
++VM_MBB	encoding.h	111
++VM_MBBID	encoding.h	112
++VM_SV32	encoding.h	113
++VM_SV39	encoding.h	114
++VM_SV48	encoding.h	115
++WRITE_FRD	decode.h	/^#define WRITE_FRD(value) WRITE_FREG(insn.rd(), val/
++WRITE_FREG	decode.h	/^# define WRITE_FREG(reg, value) DO_WRITE_FREG(reg,/
++WRITE_FREG	decode.h	/^# define WRITE_FREG(reg, value) ({ \\$/
++WRITE_RD	decode.h	/^#define WRITE_RD(value) WRITE_REG(insn.rd(), value/
++WRITE_REG	decode.h	/^# define WRITE_REG(reg, value) STATE.XPR.write(reg/
++WRITE_REG	decode.h	/^# define WRITE_REG(reg, value) ({ \\$/
++WRITE_RVC_FRS2S	decode.h	/^#define WRITE_RVC_FRS2S(value) WRITE_FREG(insn.rvc/
++WRITE_RVC_RS1S	decode.h	/^#define WRITE_RVC_RS1S(value) WRITE_REG(insn.rvc_r/
++WRITE_RVC_RS2S	decode.h	/^#define WRITE_RVC_RS2S(value) WRITE_REG(insn.rvc_r/
++X_RA	decode.h	26
++X_SP	decode.h	27
++ZERO	gdbserver.cc	55
++_MEMTRACER_H	memtracer.h	4
++_RISCV_CACHE_SIM_H	cachesim.h	4
++_RISCV_COMMON_H	common.h	4
++_RISCV_COPROCESSOR_H	extension.h	4
++_RISCV_DEBUG_MODULE_H	debug_module.h	3
++_RISCV_DECODE_H	decode.h	4
++_RISCV_DEVICES_H	devices.h	2
++_RISCV_DISASM_H	disasm.h	4
++_RISCV_GDBSERVER_H	gdbserver.h	2
++_RISCV_MMU_H	mmu.h	4
++_RISCV_MULHI_H	mulhi.h	4
++_RISCV_PROCESSOR_H	processor.h	3
++_RISCV_ROCC_H	rocc.h	2
++_RISCV_SIM_H	sim.h	4
++_RISCV_SRS_H	srs.h	2
++_RISCV_TRACER_H	tracer.h	4
++_RISCV_TRAP_H	trap.h	4
++abstract_device_t	devices.h	10
++abstract_device_t::~abstract_device_t	devices.h	/^  virtual ~abstract_device_t() {}$/
++access_check_cntr	srs.cc	/^  context_switches(0), fast_context_switches(0), a/
++access_type	memtracer.h	10
++active	srs.h	34
++addi	gdbserver.cc	/^static uint32_t addi(unsigned int dest, unsigned i/
++advance_pc	execute.cc	/^    #define advance_pc() \\$/
++amo_func	mmu.h	/^  #define amo_func(type) \\$/
++append	gdbserver.cc	/^void circular_buffer_t<T>::append(const T *src, un/
++arg_t	disasm.h	14
++arg_t::~arg_t	disasm.h	/^  virtual ~arg_t() {}$/
++bad_isa_string	processor.cc	/^static void bad_isa_string(const char* isa)$/
++bankA	srs.h	40
++bankB	srs.h	41
++base	srs.h	24
++bit	gdbserver.cc	/^static uint32_t bit(uint32_t value, unsigned int b/
++bits	gdbserver.cc	/^static uint32_t bits(uint32_t value, unsigned int /
++bus_t	devices.h	17
++bus_t::add_device	devices.cc	/^void bus_t::add_device(reg_t addr, abstract_device/
++bus_t::devices	devices.h	24
++bus_t::load	devices.cc	/^bool bus_t::load(reg_t addr, size_t len, uint8_t* /
++bus_t::std::map	devices.h	24
++bus_t::store	devices.cc	/^bool bus_t::store(reg_t addr, size_t len, const ui/
++cache_memtracer_t	cachesim.h	76
++cache_memtracer_t::cache	cachesim.h	93
++cache_memtracer_t::cache_memtracer_t	cachesim.h	/^  cache_memtracer_t(const char* config, const char/
++cache_memtracer_t::set_miss_handler	cachesim.h	/^  void set_miss_handler(cache_sim_t* mh)$/
++cache_memtracer_t::~cache_memtracer_t	cachesim.h	/^  ~cache_memtracer_t()$/
++cache_sim_t	cachesim.h	22
++cache_sim_t::DIRTY	cachesim.h	37
++cache_sim_t::VALID	cachesim.h	36
++cache_sim_t::access	cachesim.cc	/^void cache_sim_t::access(uint64_t addr, size_t byt/
++cache_sim_t::bytes_read	cachesim.h	54
++cache_sim_t::bytes_written	cachesim.h	57
++cache_sim_t::cache_sim_t	cachesim.cc	/^cache_sim_t::cache_sim_t(size_t _sets, size_t _way/
++cache_sim_t::cache_sim_t	cachesim.cc	/^cache_sim_t::cache_sim_t(const cache_sim_t& rhs)$/
++cache_sim_t::check_tag	cachesim.cc	/^uint64_t* cache_sim_t::check_tag(uint64_t addr)$/
++cache_sim_t::construct	cachesim.cc	/^cache_sim_t* cache_sim_t::construct(const char* co/
++cache_sim_t::idx_shift	cachesim.h	48
++cache_sim_t::init	cachesim.cc	/^void cache_sim_t::init()$/
++cache_sim_t::lfsr	cachesim.h	42
++cache_sim_t::linesz	cachesim.h	47
++cache_sim_t::miss_handler	cachesim.h	43
++cache_sim_t::name	cachesim.h	60
++cache_sim_t::print_stats	cachesim.cc	/^void cache_sim_t::print_stats()$/
++cache_sim_t::read_accesses	cachesim.h	52
++cache_sim_t::read_misses	cachesim.h	53
++cache_sim_t::set_miss_handler	cachesim.h	/^  void set_miss_handler(cache_sim_t* mh) { miss_ha/
++cache_sim_t::sets	cachesim.h	45
++cache_sim_t::tags	cachesim.h	50
++cache_sim_t::victimize	cachesim.cc	/^uint64_t cache_sim_t::victimize(uint64_t addr)$/
++cache_sim_t::ways	cachesim.h	46
++cache_sim_t::write_accesses	cachesim.h	55
++cache_sim_t::write_misses	cachesim.h	56
++cache_sim_t::writebacks	cachesim.h	58
++cache_sim_t::~cache_sim_t	cachesim.cc	/^cache_sim_t::~cache_sim_t()$/
++character_hex_value	gdbserver.cc	/^uint8_t character_hex_value(uint8_t character)$/
++circular_buffer_t	gdbserver.h	12
++circular_buffer_t::capacity	gdbserver.h	24
++circular_buffer_t::circular_buffer_t	gdbserver.h	/^  circular_buffer_t(unsigned int capacity) : data(/
++circular_buffer_t::circular_buffer_t	gdbserver.h	/^  circular_buffer_t() : start(0), end(0), capacity/
++circular_buffer_t::contiguous_data	gdbserver.h	/^  T *contiguous_data() { return data + start; }$/
++circular_buffer_t::contiguous_empty	gdbserver.h	/^  T *contiguous_empty() { return data + end; }$/
++circular_buffer_t::data	gdbserver.h	21
++circular_buffer_t::empty	gdbserver.h	/^  bool empty() const { return start == end; }$/
++circular_buffer_t::end	gdbserver.h	23
++circular_buffer_t::entry	gdbserver.h	/^  T entry(unsigned index) { return data[(start + i/
++circular_buffer_t::full	gdbserver.h	/^  bool full() const { return ((end+1) % capacity) /
++circular_buffer_t::start	gdbserver.h	22
++circular_buffer_t::~circular_buffer_t	gdbserver.h	/^  ~circular_buffer_t() { delete[] data; }$/
++clear_csr	encoding.h	/^#define clear_csr(reg, bit) ({ unsigned long __tmp/
++cmp	processor.cc	657
++cmp::operator()	processor.cc	/^    bool operator()(const insn_desc_t& lhs, const /
++collect_translation_info_op_t	gdbserver.cc	975
++collect_translation_info_op_t::STATE_READ_PTE	gdbserver.cc	1098
++collect_translation_info_op_t::STATE_READ_SPTBR	gdbserver.cc	1097
++collect_translation_info_op_t::STATE_START	gdbserver.cc	1096
++collect_translation_info_op_t::collect_translation_info_op_t	gdbserver.cc	/^    collect_translation_info_op_t(gdbserver_t& gdb/
++collect_translation_info_op_t::length	gdbserver.cc	1101
++collect_translation_info_op_t::levels	gdbserver.cc	1102
++collect_translation_info_op_t::perform_step	gdbserver.cc	/^    bool perform_step(unsigned int step)$/
++collect_translation_info_op_t::pte_addr	gdbserver.cc	1105
++collect_translation_info_op_t::ptesize	gdbserver.cc	1104
++collect_translation_info_op_t::ptidxbits	gdbserver.cc	1103
++collect_translation_info_op_t::state	gdbserver.cc	1099
++collect_translation_info_op_t::vaddr	gdbserver.cc	1100
++commit_log_print_insn	execute.cc	/^static void commit_log_print_insn(state_t* state, /
++commit_log_reg_t	processor.h	28
++commit_log_reg_t::addr	processor.h	30
++commit_log_reg_t::data	processor.h	31
++commit_log_stash_privilege	execute.cc	/^static void commit_log_stash_privilege(state_t* st/
++compute_checksum	gdbserver.cc	/^uint8_t compute_checksum(const std::vector<uint8_t/
++consume	gdbserver.cc	/^void circular_buffer_t<T>::consume(unsigned int by/
++consume_hex_number	gdbserver.cc	/^uint64_t consume_hex_number(std::vector<uint8_t>::/
++consume_string	gdbserver.cc	/^void consume_string(std::string &str, std::vector</
++contiguous_data_size	gdbserver.cc	/^unsigned int circular_buffer_t<T>::contiguous_data/
++contiguous_empty_size	gdbserver.cc	/^unsigned int circular_buffer_t<T>::contiguous_empt/
++continue_op_t	gdbserver.cc	455
++continue_op_t::continue_op_t	gdbserver.cc	/^    continue_op_t(gdbserver_t& gdbserver, bool sin/
++continue_op_t::perform_step	gdbserver.cc	/^    bool perform_step(unsigned int step) {$/
++continue_op_t::single_step	gdbserver.cc	508
++count	srs.h	29
++csrci	gdbserver.cc	/^static uint32_t csrci(unsigned int csr, uint16_t i/
++csrr	gdbserver.cc	/^static uint32_t csrr(unsigned int rd, unsigned int/
++csrsi	gdbserver.cc	/^static uint32_t csrsi(unsigned int csr, uint16_t i/
++csrw	gdbserver.cc	/^static uint32_t csrw(unsigned int source, unsigned/
++cto	processor.h	/^static int cto(reg_t val)$/
++ctrlc_pressed	sim.cc	14
++ctx_switch_stat	srs.h	38
++ctz	processor.cc	/^static int ctz(reg_t val)$/
++customX	rocc.cc	/^#define customX(n) \\$/
++cycle_counts	srs.h	21
++cycles	srs.h	42
++data	mmu.h	32
++data_added	gdbserver.cc	/^void circular_buffer_t<T>::data_added(unsigned int/
++dcache_sim_t	cachesim.h	110
++dcache_sim_t::dcache_sim_t	cachesim.h	/^  dcache_sim_t(const char* config) : cache_memtrac/
++dcache_sim_t::interested_in_range	cachesim.h	/^  bool interested_in_range(uint64_t begin, uint64_/
++dcache_sim_t::trace	cachesim.h	/^  void trace(uint64_t addr, size_t bytes, access_t/
++dcsr_t	processor.h	44
++debug_module_t	debug_module.h	9
++debug_module_t::clear_halt_notification	debug_module.h	/^    void clear_halt_notification(uint32_t hartid) /
++debug_module_t::clear_interrupt	debug_module.h	/^    void clear_interrupt(uint32_t hartid) {$/
++debug_module_t::debug_ram	debug_module.h	43
++debug_module_t::get_halt_notification	debug_module.h	/^    bool get_halt_notification(uint32_t hartid) co/
++debug_module_t::get_interrupt	debug_module.h	/^    bool get_interrupt(uint32_t hartid) const {$/
++debug_module_t::halt_notification	debug_module.h	42
++debug_module_t::interrupt	debug_module.h	40
++debug_module_t::load	debug_module.cc	/^bool debug_module_t::load(reg_t addr, size_t len, /
++debug_module_t::ram_read32	debug_module.cc	/^uint32_t debug_module_t::ram_read32(unsigned int i/
++debug_module_t::ram_write32	debug_module.cc	/^void debug_module_t::ram_write32(unsigned int inde/
++debug_module_t::set_halt_notification	debug_module.h	/^    void set_halt_notification(uint32_t hartid) {$/
++debug_module_t::set_interrupt	debug_module.h	/^    void set_interrupt(uint32_t hartid) {$/
++debug_module_t::store	debug_module.cc	/^bool debug_module_t::store(reg_t addr, size_t len,/
++die	gdbserver.cc	/^void die(const char* msg)$/
++dirty_ext_state	decode.h	164
++dirty_fp_state	decode.h	163
++disasm_insn_t	disasm.h	21
++disasm_insn_t::args	disasm.h	56
++disasm_insn_t::disasm_insn_t	disasm.h	/^  disasm_insn_t(const char* name, uint32_t match, /
++disasm_insn_t::get_mask	disasm.h	/^  uint32_t get_mask() const { return mask; }$/
++disasm_insn_t::get_match	disasm.h	/^  uint32_t get_match() const { return match; }$/
++disasm_insn_t::mask	disasm.h	55
++disasm_insn_t::match	disasm.h	54
++disasm_insn_t::name	disasm.h	57
++disasm_insn_t::operator ==	disasm.h	/^  bool operator == (insn_t insn) const$/
++disasm_insn_t::to_string	disasm.h	/^  std::string to_string(insn_t insn) const$/
++disassembler_t	disasm.h	60
++disassembler_t::HASH_SIZE	disasm.h	68
++disassembler_t::chain	disasm.h	69
++entries	srs.h	30
++entries	srs.h	35
++execute_insn	execute.cc	/^static reg_t execute_insn(processor_t* p, reg_t pc/
++extension_t	extension.h	11
++extension_t::clear_interrupt	extension.cc	/^void extension_t::clear_interrupt()$/
++extension_t::illegal_instruction	extension.cc	/^void extension_t::illegal_instruction()$/
++extension_t::p	extension.h	23
++extension_t::raise_interrupt	extension.cc	/^void extension_t::raise_interrupt()$/
++extension_t::reset	extension.h	/^  virtual void reset() {};$/
++extension_t::set_debug	extension.h	/^  virtual void set_debug(bool value) {};$/
++extension_t::set_processor	extension.h	/^  void set_processor(processor_t* _p) { p = _p; }$/
++extension_t::~extension_t	extension.cc	/^extension_t::~extension_t()$/
++extensions	extensions.cc	/^static std::map<std::string, std::function<extensi/
++extract_checksum	gdbserver.cc	/^uint8_t extract_checksum(const std::vector<uint8_t/
++f32	decode.h	/^#define f32(x) ((float32_t){(uint32_t)x})$/
++f64	decode.h	/^#define f64(x) ((float64_t){(uint64_t)x})$/
++fa_cache_sim_t	cachesim.h	65
++fa_cache_sim_t::check_tag	cachesim.cc	/^uint64_t* fa_cache_sim_t::check_tag(uint64_t addr)/
++fa_cache_sim_t::fa_cache_sim_t	cachesim.cc	/^fa_cache_sim_t::fa_cache_sim_t(size_t ways, size_t/
++fa_cache_sim_t::std::map	cachesim.h	73
++fa_cache_sim_t::tags	cachesim.h	73
++fa_cache_sim_t::victimize	cachesim.cc	/^uint64_t fa_cache_sim_t::victimize(uint64_t addr)$/
++fence_i	gdbserver.cc	/^static uint32_t fence_i()$/
++fld	gdbserver.cc	/^static uint32_t fld(unsigned int dest, unsigned in/
++flw	gdbserver.cc	/^static uint32_t flw(unsigned int dest, unsigned in/
++fpr	interactive.cc	230
++fpr::d	interactive.cc	234
++fpr::r	interactive.cc	232
++fpr::s	interactive.cc	233
++fpr_name	regnames.cc	12
++freg_t	decode.h	20
++fsd	gdbserver.cc	/^static uint32_t fsd(unsigned int src, unsigned int/
++fsw	gdbserver.cc	/^static uint32_t fsw(unsigned int src, unsigned int/
++func	mmu.h	25
++funct	rocc.h	15
++gdb_breakpoint_type_t	gdbserver.h	138
++gdbserver_t	gdbserver.h	140
++gdbserver_t::accept	gdbserver.cc	/^void gdbserver_t::accept()$/
++gdbserver_t::add_operation	gdbserver.cc	/^void gdbserver_t::add_operation(operation_t* opera/
++gdbserver_t::client_fd	gdbserver.h	245
++gdbserver_t::connected	gdbserver.h	/^  bool connected() const { return client_fd > 0; }/
++gdbserver_t::consume_hex_number_le	gdbserver.cc	/^uint64_t gdbserver_t::consume_hex_number_le($/
++gdbserver_t::dcsr	gdbserver.h	218
++gdbserver_t::dpc	gdbserver.h	217
++gdbserver_t::dr_read	gdbserver.cc	/^uint64_t gdbserver_t::dr_read(enum slot slot)$/
++gdbserver_t::dr_read32	gdbserver.cc	/^uint32_t gdbserver_t::dr_read32(unsigned int index/
++gdbserver_t::dr_read64	gdbserver.cc	/^uint64_t gdbserver_t::dr_read64(unsigned int index/
++gdbserver_t::dr_write	gdbserver.cc	/^void gdbserver_t::dr_write(enum slot slot, uint64_/
++gdbserver_t::dr_write32	gdbserver.cc	/^void gdbserver_t::dr_write32(unsigned int index, u/
++gdbserver_t::dr_write64	gdbserver.cc	/^void gdbserver_t::dr_write64(unsigned int index, u/
++gdbserver_t::dr_write_jump	gdbserver.cc	/^void gdbserver_t::dr_write_jump(unsigned int index/
++gdbserver_t::dr_write_load	gdbserver.cc	/^void gdbserver_t::dr_write_load(unsigned int index/
++gdbserver_t::dr_write_store	gdbserver.cc	/^void gdbserver_t::dr_write_store(unsigned int inde/
++gdbserver_t::end_packet	gdbserver.cc	/^void gdbserver_t::end_packet(const char* data)$/
++gdbserver_t::expect_ack	gdbserver.h	249
++gdbserver_t::extended_mode	gdbserver.h	250
++gdbserver_t::fence_i_required	gdbserver.h	225
++gdbserver_t::find_access_size	gdbserver.cc	/^unsigned int gdbserver_t::find_access_size(reg_t a/
++gdbserver_t::gdbserver_t	gdbserver.cc	/^gdbserver_t::gdbserver_t(uint16_t port, sim_t *sim/
++gdbserver_t::handle	gdbserver.cc	/^void gdbserver_t::handle()$/
++gdbserver_t::handle_breakpoint	gdbserver.cc	/^void gdbserver_t::handle_breakpoint(const std::vec/
++gdbserver_t::handle_continue	gdbserver.cc	/^void gdbserver_t::handle_continue(const std::vecto/
++gdbserver_t::handle_extended	gdbserver.cc	/^void gdbserver_t::handle_extended(const std::vecto/
++gdbserver_t::handle_general_registers_read	gdbserver.cc	/^void gdbserver_t::handle_general_registers_read(co/
++gdbserver_t::handle_halt_reason	gdbserver.cc	/^void gdbserver_t::handle_halt_reason(const std::ve/
++gdbserver_t::handle_interrupt	gdbserver.cc	/^void gdbserver_t::handle_interrupt()$/
++gdbserver_t::handle_kill	gdbserver.cc	/^void gdbserver_t::handle_kill(const std::vector<ui/
++gdbserver_t::handle_memory_binary_write	gdbserver.cc	/^void gdbserver_t::handle_memory_binary_write(const/
++gdbserver_t::handle_memory_read	gdbserver.cc	/^void gdbserver_t::handle_memory_read(const std::ve/
++gdbserver_t::handle_packet	gdbserver.cc	/^void gdbserver_t::handle_packet(const std::vector</
++gdbserver_t::handle_query	gdbserver.cc	/^void gdbserver_t::handle_query(const std::vector<u/
++gdbserver_t::handle_register_read	gdbserver.cc	/^void gdbserver_t::handle_register_read(const std::/
++gdbserver_t::handle_register_write	gdbserver.cc	/^void gdbserver_t::handle_register_write(const std:/
++gdbserver_t::handle_step	gdbserver.cc	/^void gdbserver_t::handle_step(const std::vector<ui/
++gdbserver_t::hardware_breakpoint_insert	gdbserver.cc	/^void gdbserver_t::hardware_breakpoint_insert(const/
++gdbserver_t::hardware_breakpoint_remove	gdbserver.cc	/^void gdbserver_t::hardware_breakpoint_remove(const/
++gdbserver_t::hardware_breakpoints	gdbserver.h	240
++gdbserver_t::mstatus	gdbserver.h	219
++gdbserver_t::mstatus_dirty	gdbserver.h	220
++gdbserver_t::operation_queue	gdbserver.h	265
++gdbserver_t::privilege_mode	gdbserver.cc	/^unsigned int gdbserver_t::privilege_mode()$/
++gdbserver_t::process_requests	gdbserver.cc	/^void gdbserver_t::process_requests()$/
++gdbserver_t::pte_cache	gdbserver.h	227
++gdbserver_t::read	gdbserver.cc	/^void gdbserver_t::read()$/
++gdbserver_t::recv_buf	gdbserver.h	246
++gdbserver_t::running	gdbserver.h	253
++gdbserver_t::running_checksum	gdbserver.h	187
++gdbserver_t::send	gdbserver.cc	/^void gdbserver_t::send(const char* msg)$/
++gdbserver_t::send	gdbserver.cc	/^void gdbserver_t::send(uint64_t value)$/
++gdbserver_t::send	gdbserver.cc	/^void gdbserver_t::send(uint32_t value)$/
++gdbserver_t::send	gdbserver.cc	/^void gdbserver_t::send(uint8_t value)$/
++gdbserver_t::send_buf	gdbserver.h	247
++gdbserver_t::send_packet	gdbserver.cc	/^void gdbserver_t::send_packet(const char* data)$/
++gdbserver_t::set_interrupt	gdbserver.cc	/^void gdbserver_t::set_interrupt(uint32_t hartid) {/
++gdbserver_t::sim	gdbserver.h	243
++gdbserver_t::socket_fd	gdbserver.h	244
++gdbserver_t::software_breakpoint_insert	gdbserver.cc	/^void gdbserver_t::software_breakpoint_insert(reg_t/
++gdbserver_t::software_breakpoint_remove	gdbserver.cc	/^void gdbserver_t::software_breakpoint_remove(reg_t/
++gdbserver_t::software_breakpoints	gdbserver.h	255
++gdbserver_t::sptbr	gdbserver.h	221
++gdbserver_t::sptbr_valid	gdbserver.h	222
++gdbserver_t::start_packet	gdbserver.cc	/^void gdbserver_t::start_packet()$/
++gdbserver_t::std::map	gdbserver.h	227
++gdbserver_t::std::map	gdbserver.h	255
++gdbserver_t::std::set	gdbserver.h	239
++gdbserver_t::translate	gdbserver.cc	/^reg_t gdbserver_t::translate(reg_t vaddr)$/
++gdbserver_t::tselect	gdbserver.h	223
++gdbserver_t::tselect_valid	gdbserver.h	224
++gdbserver_t::virtual_memory	gdbserver.cc	/^unsigned int gdbserver_t::virtual_memory()$/
++gdbserver_t::write	gdbserver.cc	/^void gdbserver_t::write()$/
++gdbserver_t::xlen	gdbserver.h	237
++general_registers_read_op_t	gdbserver.cc	511
++general_registers_read_op_t::general_registers_read_op_t	gdbserver.cc	/^    general_registers_read_op_t(gdbserver_t& gdbse/
++general_registers_read_op_t::perform_step	gdbserver.cc	/^    bool perform_step(unsigned int step)$/
++get_field	decode.h	/^#define get_field(reg, mask) (((reg) & (decltype(r/
++get_insn_list	riscv.mk.in	1
++halt_op_t	gdbserver.cc	335
++halt_op_t::ST_DCSR	gdbserver.cc	451
++halt_op_t::ST_DPC	gdbserver.cc	449
++halt_op_t::ST_ENTER	gdbserver.cc	447
++halt_op_t::ST_MSTATUS	gdbserver.cc	450
++halt_op_t::ST_XLEN	gdbserver.cc	448
++halt_op_t::halt_op_t	gdbserver.cc	/^    halt_op_t(gdbserver_t& gdbserver, bool send_st/
++halt_op_t::perform_step	gdbserver.cc	/^    bool perform_step(unsigned int step) {$/
++halt_op_t::send_status	gdbserver.cc	445
++halt_op_t::state	gdbserver.cc	452
++halt_op_t::write_dpc_program	gdbserver.cc	/^    void write_dpc_program() {$/
++handle_signal	sim.cc	/^static void handle_signal(int sig)$/
++hardware_breakpoint_compare_t	gdbserver.h	67
++hardware_breakpoint_compare_t::operator()	gdbserver.h	/^  bool operator()(const hardware_breakpoint_t& a, /
++hardware_breakpoint_insert_op_t	gdbserver.cc	1108
++hardware_breakpoint_insert_op_t::STATE_CHECK_INDEX	gdbserver.cc	1217
++hardware_breakpoint_insert_op_t::STATE_CHECK_MCONTROL	gdbserver.cc	1218
++hardware_breakpoint_insert_op_t::STATE_START	gdbserver.cc	1216
++hardware_breakpoint_insert_op_t::STATE_WRITE_ADDRESS	gdbserver.cc	1219
++hardware_breakpoint_insert_op_t::bp	gdbserver.cc	1221
++hardware_breakpoint_insert_op_t::hardware_breakpoint_insert_op_t	gdbserver.cc	/^    hardware_breakpoint_insert_op_t(gdbserver_t& g/
++hardware_breakpoint_insert_op_t::perform_step	gdbserver.cc	/^    bool perform_step(unsigned int step)$/
++hardware_breakpoint_insert_op_t::state	gdbserver.cc	1220
++hardware_breakpoint_insert_op_t::write_new_index_program	gdbserver.cc	/^    void write_new_index_program()$/
++hardware_breakpoint_remove_op_t	gdbserver.cc	1278
++hardware_breakpoint_remove_op_t::bp	gdbserver.cc	1295
++hardware_breakpoint_remove_op_t::hardware_breakpoint_remove_op_t	gdbserver.cc	/^    hardware_breakpoint_remove_op_t(gdbserver_t& g/
++hardware_breakpoint_remove_op_t::perform_step	gdbserver.cc	/^    bool perform_step(unsigned int step) {$/
++hardware_breakpoint_t	gdbserver.h	58
++hardware_breakpoint_t::execute	gdbserver.h	64
++hardware_breakpoint_t::index	gdbserver.h	63
++hardware_breakpoint_t::load	gdbserver.h	64
++hardware_breakpoint_t::size	gdbserver.h	62
++hardware_breakpoint_t::store	gdbserver.h	64
++hardware_breakpoint_t::vaddr	gdbserver.h	61
++help	cachesim.cc	/^static void help()$/
++i	rocc.h	21
++icache_entry_t	mmu.h	29
++icache_sim_t	cachesim.h	96
++icache_sim_t::icache_sim_t	cachesim.h	/^  icache_sim_t(const char* config) : cache_memtrac/
++icache_sim_t::interested_in_range	cachesim.h	/^  bool interested_in_range(uint64_t begin, uint64_/
++icache_sim_t::trace	cachesim.h	/^  void trace(uint64_t addr, size_t bytes, access_t/
++illegal_instruction	processor.cc	/^reg_t illegal_instruction(processor_t* p, insn_t i/
++insn	mmu.h	26
++insn_bits_t	decode.h	60
++insn_desc_t	processor.h	20
++insn_desc_t::mask	processor.h	23
++insn_desc_t::match	processor.h	22
++insn_desc_t::rv32	processor.h	24
++insn_desc_t::rv64	processor.h	25
++insn_fetch_t	mmu.h	23
++insn_func_t	processor.h	14
++insn_length	decode.h	/^#define insn_length(x) \\$/
++insn_t	decode.h	61
++insn_t::b	decode.h	99
++insn_t::bits	decode.h	/^  insn_bits_t bits() { return b; }$/
++insn_t::csr	decode.h	/^  uint64_t csr() { return x(20, 12); }$/
++insn_t::i_imm	decode.h	/^  int64_t i_imm() { return int64_t(b) >> 20; }$/
++insn_t::imm_sign	decode.h	/^  uint64_t imm_sign() { return xs(63, 1); }$/
++insn_t::insn_t	decode.h	/^  insn_t(insn_bits_t bits) : b(bits) {}$/
++insn_t::length	decode.h	/^  int length() { return insn_length(b); }$/
++insn_t::rd	decode.h	/^  uint64_t rd() { return x(7, 5); }$/
++insn_t::rm	decode.h	/^  uint64_t rm() { return x(12, 3); }$/
++insn_t::rs1	decode.h	/^  uint64_t rs1() { return x(15, 5); }$/
++insn_t::rs2	decode.h	/^  uint64_t rs2() { return x(20, 5); }$/
++insn_t::rs3	decode.h	/^  uint64_t rs3() { return x(27, 5); }$/
++insn_t::rvc_addi16sp_imm	decode.h	/^  int64_t rvc_addi16sp_imm() { return (x(6, 1) << /
++insn_t::rvc_addi4spn_imm	decode.h	/^  int64_t rvc_addi4spn_imm() { return (x(6, 1) << /
++insn_t::rvc_b_imm	decode.h	/^  int64_t rvc_b_imm() { return (x(3, 2) << 1) + (x/
++insn_t::rvc_imm	decode.h	/^  int64_t rvc_imm() { return x(2, 5) + (xs(12, 1) /
++insn_t::rvc_j_imm	decode.h	/^  int64_t rvc_j_imm() { return (x(3, 3) << 1) + (x/
++insn_t::rvc_ld_imm	decode.h	/^  int64_t rvc_ld_imm() { return (x(10, 3) << 3) + /
++insn_t::rvc_ldsp_imm	decode.h	/^  int64_t rvc_ldsp_imm() { return (x(5, 2) << 3) +/
++insn_t::rvc_lw_imm	decode.h	/^  int64_t rvc_lw_imm() { return (x(6, 1) << 2) + (/
++insn_t::rvc_lwsp_imm	decode.h	/^  int64_t rvc_lwsp_imm() { return (x(4, 3) << 2) +/
++insn_t::rvc_rd	decode.h	/^  uint64_t rvc_rd() { return rd(); }$/
++insn_t::rvc_rs1	decode.h	/^  uint64_t rvc_rs1() { return rd(); }$/
++insn_t::rvc_rs1s	decode.h	/^  uint64_t rvc_rs1s() { return 8 + x(7, 3); }$/
++insn_t::rvc_rs2	decode.h	/^  uint64_t rvc_rs2() { return x(2, 5); }$/
++insn_t::rvc_rs2s	decode.h	/^  uint64_t rvc_rs2s() { return 8 + x(2, 3); }$/
++insn_t::rvc_sdsp_imm	decode.h	/^  int64_t rvc_sdsp_imm() { return (x(10, 3) << 3) /
++insn_t::rvc_simm3	decode.h	/^  int64_t rvc_simm3() { return x(10, 3); }$/
++insn_t::rvc_swsp_imm	decode.h	/^  int64_t rvc_swsp_imm() { return (x(9, 4) << 2) +/
++insn_t::rvc_zimm	decode.h	/^  int64_t rvc_zimm() { return x(2, 5) + (x(12, 1) /
++insn_t::s_imm	decode.h	/^  int64_t s_imm() { return x(7, 5) + (xs(25, 7) <</
++insn_t::sb_imm	decode.h	/^  int64_t sb_imm() { return (x(8, 4) << 1) + (x(25/
++insn_t::u_imm	decode.h	/^  int64_t u_imm() { return int64_t(b) >> 12 << 12;/
++insn_t::uj_imm	decode.h	/^  int64_t uj_imm() { return (x(21, 10) << 1) + (x(/
++insn_t::x	decode.h	/^  uint64_t x(int lo, int len) { return (b >> lo) &/
++insn_t::xs	decode.h	/^  uint64_t xs(int lo, int len) { return int64_t(b)/
++instruction	srs.h	39
++invalid_pc	decode.h	/^#define invalid_pc(pc) ((pc) & 1)$/
++jal	gdbserver.cc	/^static uint32_t jal(unsigned int rd, uint32_t imm)/
++lb	gdbserver.cc	/^static uint32_t lb(unsigned int rd, unsigned int b/
++ld	gdbserver.cc	/^static uint32_t ld(unsigned int rd, unsigned int b/
++lfsr_t	cachesim.h	12
++lfsr_t::lfsr_t	cachesim.h	/^  lfsr_t() : reg(1) {}$/
++lfsr_t::lfsr_t	cachesim.h	/^  lfsr_t(const lfsr_t& lfsr) : reg(lfsr.reg) {}$/
++lfsr_t::next	cachesim.h	/^  uint32_t next() { return reg = (reg>>1)^(-(reg&1/
++lfsr_t::reg	cachesim.h	19
++lh	gdbserver.cc	/^static uint32_t lh(unsigned int rd, unsigned int b/
++likely	common.h	/^#define   likely(x) __builtin_expect(x, 1)$/
++limit	srs.h	25
++load_func	mmu.h	/^  #define load_func(type) \\$/
++lq	gdbserver.cc	/^static uint32_t lq(unsigned int rd, unsigned int b/
++lw	gdbserver.cc	/^static uint32_t lw(unsigned int rd, unsigned int b/
++maybe_restore_mstatus_op_t	gdbserver.cc	1263
++maybe_restore_mstatus_op_t::maybe_restore_mstatus_op_t	gdbserver.cc	/^    maybe_restore_mstatus_op_t(gdbserver_t& gdbser/
++maybe_restore_mstatus_op_t::perform_step	gdbserver.cc	/^    bool perform_step(unsigned int step) {$/
++maybe_restore_tselect_op_t	gdbserver.cc	1248
++maybe_restore_tselect_op_t::maybe_restore_tselect_op_t	gdbserver.cc	/^    maybe_restore_tselect_op_t(gdbserver_t& gdbser/
++maybe_restore_tselect_op_t::perform_step	gdbserver.cc	/^    bool perform_step(unsigned int step) {$/
++maybe_save_tselect_op_t	gdbserver.cc	1224
++maybe_save_tselect_op_t::maybe_save_tselect_op_t	gdbserver.cc	/^    maybe_save_tselect_op_t(gdbserver_t& gdbserver/
++maybe_save_tselect_op_t::perform_step	gdbserver.cc	/^    bool perform_step(unsigned int step) {$/
++mcontrol_action_t	processor.h	53
++mcontrol_match_t	processor.h	63
++mcontrol_t	processor.h	82
++mem_trap_t	trap.h	24
++mem_trap_t::badaddr	trap.h	32
++mem_trap_t::get_badaddr	trap.h	/^  reg_t get_badaddr() override { return badaddr; }/
++mem_trap_t::has_badaddr	trap.h	/^  bool has_badaddr() override { return true; }$/
++mem_trap_t::mem_trap_t	trap.h	/^  mem_trap_t(reg_t which, reg_t badaddr)$/
++memory_read_op_t	gdbserver.cc	749
++memory_read_op_t::access_size	gdbserver.cc	843
++memory_read_op_t::buf	gdbserver.cc	845
++memory_read_op_t::data	gdbserver.cc	841
++memory_read_op_t::index	gdbserver.cc	844
++memory_read_op_t::length	gdbserver.cc	840
++memory_read_op_t::memory_read_op_t	gdbserver.cc	/^    memory_read_op_t(gdbserver_t& gdbserver, reg_t/
++memory_read_op_t::paddr	gdbserver.cc	842
++memory_read_op_t::perform_step	gdbserver.cc	/^    bool perform_step(unsigned int step)$/
++memory_read_op_t::vaddr	gdbserver.cc	839
++memory_read_op_t::~memory_read_op_t	gdbserver.cc	/^    ~memory_read_op_t()$/
++memory_write_op_t	gdbserver.cc	848
++memory_write_op_t::access_size	gdbserver.cc	971
++memory_write_op_t::data	gdbserver.cc	972
++memory_write_op_t::length	gdbserver.cc	970
++memory_write_op_t::memory_write_op_t	gdbserver.cc	/^    memory_write_op_t(gdbserver_t& gdbserver, reg_/
++memory_write_op_t::offset	gdbserver.cc	969
++memory_write_op_t::perform_step	gdbserver.cc	/^    bool perform_step(unsigned int step)$/
++memory_write_op_t::vaddr	gdbserver.cc	968
++memory_write_op_t::~memory_write_op_t	gdbserver.cc	/^    ~memory_write_op_t() {$/
++memtracer_list_t	memtracer.h	26
++memtracer_list_t::empty	memtracer.h	/^  bool empty() { return list.empty(); }$/
++memtracer_list_t::hook	memtracer.h	/^  void hook(memtracer_t* h)$/
++memtracer_list_t::interested_in_range	memtracer.h	/^  bool interested_in_range(uint64_t begin, uint64_/
++memtracer_list_t::list	memtracer.h	47
++memtracer_list_t::trace	memtracer.h	/^  void trace(uint64_t addr, size_t bytes, access_t/
++memtracer_t	memtracer.h	16
++memtracer_t::memtracer_t	memtracer.h	/^  memtracer_t() {}$/
++memtracer_t::~memtracer_t	memtracer.h	/^  virtual ~memtracer_t() {}$/
++mmu_t	mmu.h	50
++mmu_t::TLB_CHECK_TRIGGERS	mmu.h	228
++mmu_t::TLB_ENTRIES	mmu.h	225
++mmu_t::access_icache	mmu.h	/^  inline icache_entry_t* access_icache(reg_t addr)/
++mmu_t::check_triggers_fetch	mmu.h	277
++mmu_t::check_triggers_load	mmu.h	278
++mmu_t::check_triggers_store	mmu.h	279
++mmu_t::fetch_slow_path	mmu.cc	/^const uint16_t* mmu_t::fetch_slow_path(reg_t vaddr/
++mmu_t::fetch_temp	mmu.h	219
++mmu_t::flush_icache	mmu.cc	/^void mmu_t::flush_icache()$/
++mmu_t::flush_tlb	mmu.cc	/^void mmu_t::flush_tlb()$/
++mmu_t::get_srs	mmu.h	/^  srs_t *get_srs() { return srs; }$/
++mmu_t::icache	mmu.h	222
++mmu_t::icache_index	mmu.h	/^  inline size_t icache_index(reg_t addr)$/
++mmu_t::load_insn	mmu.h	/^  inline insn_fetch_t load_insn(reg_t addr)$/
++mmu_t::load_slow_path	mmu.cc	/^void mmu_t::load_slow_path(reg_t addr, reg_t len, /
++mmu_t::matched_trigger	mmu.h	281
++mmu_t::mmu_t	mmu.cc	/^mmu_t::mmu_t(sim_t* sim, processor_t* proc)$/
++mmu_t::proc	mmu.h	217
++mmu_t::refill_icache	mmu.h	/^  inline icache_entry_t* refill_icache(reg_t addr,/
++mmu_t::refill_tlb	mmu.cc	/^void mmu_t::refill_tlb(reg_t vaddr, reg_t paddr, a/
++mmu_t::register_memtracer	mmu.cc	/^void mmu_t::register_memtracer(memtracer_t* t)$/
++mmu_t::sim	mmu.h	216
++mmu_t::srs	mmu.h	288
++mmu_t::store_slow_path	mmu.cc	/^void mmu_t::store_slow_path(reg_t addr, reg_t len,/
++mmu_t::tlb_data	mmu.h	229
++mmu_t::tlb_insn_tag	mmu.h	230
++mmu_t::tlb_load_tag	mmu.h	231
++mmu_t::tlb_store_tag	mmu.h	232
++mmu_t::tracer	mmu.h	218
++mmu_t::translate	mmu.cc	/^reg_t mmu_t::translate(reg_t addr, access_type typ/
++mmu_t::translate_insn_addr	mmu.h	/^  inline const uint16_t* translate_insn_addr(reg_t/
++mmu_t::trigger_exception	mmu.h	/^  inline trigger_matched_t *trigger_exception(trig/
++mmu_t::walk	mmu.cc	/^reg_t mmu_t::walk(reg_t addr, access_type type, re/
++mmu_t::~mmu_t	mmu.cc	/^mmu_t::~mmu_t()$/
++mulh	mulhi.h	/^inline int64_t mulh(int64_t a, int64_t b)$/
++mulhsu	mulhi.h	/^inline int64_t mulhsu(int64_t a, uint64_t b)$/
++mulhu	mulhi.h	/^inline uint64_t mulhu(uint64_t a, uint64_t b)$/
++n	gen_icache	2
++nop	gdbserver.cc	/^static uint32_t nop()$/
++opcode	rocc.h	8
++operation_t	gdbserver.h	77
++operation_t::current_step	gdbserver.h	99
++operation_t::gs	gdbserver.h	98
++operation_t::operation_t	gdbserver.h	/^    operation_t(gdbserver_t& gdbserver) : gs(gdbse/
++operation_t::step	gdbserver.h	/^    bool step() {$/
++operation_t::~operation_t	gdbserver.h	/^    virtual ~operation_t() {}$/
++ori	gdbserver.cc	/^static uint32_t ori(unsigned int dest, unsigned in/
++pad	mmu.h	31
++print_packet	gdbserver.cc	/^void print_packet(const std::vector<uint8_t> &pack/
++processor_t	processor.h	160
++processor_t::OPCODE_CACHE_SIZE	processor.h	298
++processor_t::build_opcode_map	processor.cc	/^void processor_t::build_opcode_map()$/
++processor_t::debug	processor.h	193
++processor_t::decode_insn	processor.cc	/^insn_func_t processor_t::decode_insn(insn_t insn)$/
++processor_t::disasm	processor.cc	/^void processor_t::disasm(insn_t insn)$/
++processor_t::disassembler	processor.h	284
++processor_t::enter_debug_mode	processor.cc	/^void processor_t::enter_debug_mode(uint8_t cause)$/
++processor_t::ext	processor.h	283
++processor_t::get_csr	processor.cc	/^reg_t processor_t::get_csr(int which)$/
++processor_t::get_disassembler	processor.h	/^  const disassembler_t* get_disassembler() { retur/
++processor_t::get_extension	processor.h	/^  extension_t* get_extension() { return ext; }$/
++processor_t::get_mmu	processor.h	/^  mmu_t* get_mmu() { return mmu; }$/
++processor_t::get_state	processor.h	/^  state_t* get_state() { return &state; }$/
++processor_t::halt_on_reset	processor.h	293
++processor_t::histogram_enabled	processor.h	292
++processor_t::id	processor.h	286
++processor_t::instructions	processor.h	295
++processor_t::isa	processor.h	289
++processor_t::isa_string	processor.h	291
++processor_t::load	processor.cc	/^bool processor_t::load(reg_t addr, size_t len, uin/
++processor_t::max_isa	processor.h	290
++processor_t::max_xlen	processor.h	287
++processor_t::mmu	processor.h	282
++processor_t::opcode_cache	processor.h	299
++processor_t::paddr_bits	processor.cc	/^int processor_t::paddr_bits()$/
++processor_t::parse_isa_string	processor.cc	/^void processor_t::parse_isa_string(const char* str/
++processor_t::pc_histogram	processor.h	296
++processor_t::processor_t	processor.cc	/^processor_t::processor_t(const char* isa, sim_t* s/
++processor_t::raise_interrupt	processor.cc	/^void processor_t::raise_interrupt(reg_t which)$/
++processor_t::register_base_instructions	processor.cc	/^void processor_t::register_base_instructions()$/
++processor_t::register_extension	processor.cc	/^void processor_t::register_extension(extension_t* /
++processor_t::register_insn	processor.cc	/^void processor_t::register_insn(insn_desc_t desc)$/
++processor_t::reset	processor.cc	/^void processor_t::reset()$/
++processor_t::set_csr	processor.cc	/^void processor_t::set_csr(int which, reg_t val)$/
++processor_t::set_debug	processor.cc	/^void processor_t::set_debug(bool value)$/
++processor_t::set_histogram	processor.cc	/^void processor_t::set_histogram(bool value)$/
++processor_t::set_privilege	processor.cc	/^void processor_t::set_privilege(reg_t prv)$/
++processor_t::sim	processor.h	281
++processor_t::slow_path	execute.cc	/^bool processor_t::slow_path()$/
++processor_t::state	processor.h	285
++processor_t::std::map	processor.h	296
++processor_t::step	execute.cc	/^void processor_t::step(size_t n)$/
++processor_t::store	processor.cc	/^bool processor_t::store(reg_t addr, size_t len, co/
++processor_t::supports_extension	processor.h	/^  bool supports_extension(unsigned char ext) {$/
++processor_t::take_interrupt	processor.cc	/^void processor_t::take_interrupt()$/
++processor_t::take_trap	processor.cc	/^void processor_t::take_trap(trap_t& t, reg_t epc)$/
++processor_t::trigger_match	processor.h	/^  inline int trigger_match(trigger_operation_t ope/
++processor_t::trigger_updated	processor.cc	/^void processor_t::trigger_updated()$/
++processor_t::update_histogram	execute.cc	/^inline void processor_t::update_histogram(reg_t pc/
++processor_t::xlen	processor.h	288
++processor_t::yield_load_reservation	processor.h	/^  void yield_load_reservation() { state.load_reser/
++processor_t::~processor_t	processor.cc	/^processor_t::~processor_t()$/
++r	rocc.h	20
++rd	rocc.h	9
++rdcycle	encoding.h	/^#define rdcycle() read_csr(cycle)$/
++rdinstret	encoding.h	/^#define rdinstret() read_csr(instret)$/
++rdtime	encoding.h	/^#define rdtime() read_csr(time)$/
++read_csr	encoding.h	/^#define read_csr(reg) ({ unsigned long __tmp; \\$/
++readline	interactive.cc	/^static std::string readline(int fd)$/
++reg_from_bytes	mmu.cc	/^reg_t reg_from_bytes(size_t len, const uint8_t* by/
++reg_t	decode.h	19
++regfile_t	decode.h	106
++regfile_t::data	decode.h	119
++regfile_t::operator []	decode.h	/^  const T& operator [] (size_t i) const$/
++regfile_t::write	decode.h	/^  void write(size_t i, T value)$/
++register_extension	extensions.cc	/^void register_extension(const char* name, std::fun/
++register_read_op_t	gdbserver.cc	584
++register_read_op_t::perform_step	gdbserver.cc	/^    bool perform_step(unsigned int step)$/
++register_read_op_t::reg	gdbserver.cc	670
++register_read_op_t::register_read_op_t	gdbserver.cc	/^    register_read_op_t(gdbserver_t& gdbserver, uns/
++register_write_op_t	gdbserver.cc	673
++register_write_op_t::perform_step	gdbserver.cc	/^    bool perform_step(unsigned int step)$/
++register_write_op_t::reg	gdbserver.cc	745
++register_write_op_t::register_write_op_t	gdbserver.cc	/^    register_write_op_t(gdbserver_t& gdbserver, un/
++register_write_op_t::value	gdbserver.cc	746
++require	decode.h	/^#define require(x) if (unlikely(!(x))) throw trap_/
++require_accelerator	decode.h	185
++require_extension	decode.h	/^#define require_extension(s) require(p->supports_e/
++require_fp	decode.h	184
++require_privilege	decode.h	/^#define require_privilege(p) require(STATE.prv >= /
++require_rv32	decode.h	182
++require_rv64	decode.h	181
++reset	gdbserver.cc	/^void circular_buffer_t<T>::reset()$/
++riscv_junk	riscv.mk.in	283
++rocc_insn_t	rocc.h	6
++rocc_insn_union_t	rocc.h	18
++rocc_t	rocc.h	24
++rocc_t::get_disasms	rocc.cc	/^std::vector<disasm_insn_t*> rocc_t::get_disasms()$/
++rocc_t::get_instructions	rocc.cc	/^std::vector<insn_desc_t> rocc_t::get_instructions(/
++rom_device_t	devices.h	27
++rom_device_t::contents	devices.h	/^  const std::vector<char>& contents() { return dat/
++rom_device_t::data	devices.h	34
++rom_device_t::load	rom.cc	/^bool rom_device_t::load(reg_t addr, size_t len, ui/
++rom_device_t::rom_device_t	rom.cc	/^rom_device_t::rom_device_t(std::vector<char> data)/
++rom_device_t::store	rom.cc	/^bool rom_device_t::store(reg_t addr, size_t len, c/
++rs1	rocc.h	13
++rs2	rocc.h	14
++rtc_t	devices.h	37
++rtc_t::increment	rtc.cc	/^void rtc_t::increment(reg_t inc)$/
++rtc_t::load	rtc.cc	/^bool rtc_t::load(reg_t addr, size_t len, uint8_t* /
++rtc_t::procs	devices.h	45
++rtc_t::regs	devices.h	46
++rtc_t::rtc_t	rtc.cc	/^rtc_t::rtc_t(std::vector<processor_t*>& procs)$/
++rtc_t::size	devices.h	/^  size_t size() { return regs.size() * sizeof(regs/
++rtc_t::store	rtc.cc	/^bool rtc_t::store(reg_t addr, size_t len, const ui/
++rtc_t::time	devices.h	/^  uint64_t time() { return regs[0]; }$/
++rv32_NAME	insn_template.cc	/^reg_t rv32_NAME(processor_t* p, insn_t insn, reg_t/
++rv64_NAME	insn_template.cc	/^reg_t rv64_NAME(processor_t* p, insn_t insn, reg_t/
++sb	gdbserver.cc	/^static uint32_t sb(unsigned int src, unsigned int /
++sd	gdbserver.cc	/^static uint32_t sd(unsigned int src, unsigned int /
++set_csr	encoding.h	/^#define set_csr(reg, bit) ({ unsigned long __tmp; /
++set_field	decode.h	/^#define set_field(reg, mask, val) (((reg) & ~(decl/
++set_fp_exceptions	decode.h	187
++set_pc	decode.h	/^#define set_pc(x) \\$/
++set_pc_and_serialize	decode.h	/^#define set_pc_and_serialize(x) \\$/
++sext32	decode.h	/^#define sext32(x) ((sreg_t)(int32_t)(x))$/
++sext_xlen	decode.h	/^#define sext_xlen(x) (((sreg_t)(x) << (64-xlen)) >/
++sh	gdbserver.cc	/^static uint32_t sh(unsigned int src, unsigned int /
++sim_t	interactive.cc	60
++sim_t	sim.h	19
++sim_t::INSNS_PER_RTC_TICK	sim.h	50
++sim_t::INTERLEAVE	sim.h	49
++sim_t::addr_is_mem	sim.h	/^  bool addr_is_mem(reg_t addr) {$/
++sim_t::addr_to_mem	sim.h	/^  char* addr_to_mem(reg_t addr) { return mem + add/
++sim_t::boot_rom	sim.h	42
++sim_t::bus	sim.h	44
++sim_t::chunk_align	sim.h	/^  size_t chunk_align() { return 8; }$/
++sim_t::chunk_max_size	sim.h	/^  size_t chunk_max_size() { return 8; }$/
++sim_t::config_string	sim.h	41
++sim_t::current_proc	sim.h	52
++sim_t::current_step	sim.h	51
++sim_t::debug	sim.h	53
++sim_t::debug_mmu	sim.h	39
++sim_t::debug_module	sim.h	45
++sim_t::gdbserver	sim.h	56
++sim_t::get_config_string	sim.h	/^  const char* get_config_string() { return config_/
++sim_t::get_core	interactive.cc	/^processor_t *sim_t::get_core(const std::string& i)/
++sim_t::get_core	sim.h	/^  processor_t* get_core(size_t i) { return procs.a/
++sim_t::get_freg	interactive.cc	/^reg_t sim_t::get_freg(const std::vector<std::strin/
++sim_t::get_mem	interactive.cc	/^reg_t sim_t::get_mem(const std::vector<std::string/
++sim_t::get_pc	interactive.cc	/^reg_t sim_t::get_pc(const std::vector<std::string>/
++sim_t::get_reg	interactive.cc	/^reg_t sim_t::get_reg(const std::vector<std::string/
++sim_t::histogram_enabled	sim.h	55
++sim_t::host	sim.h	97
++sim_t::idle	sim.cc	/^void sim_t::idle()$/
++sim_t::interactive	interactive.cc	/^void sim_t::interactive()$/
++sim_t::interactive_fregd	interactive.cc	/^void sim_t::interactive_fregd(const std::string& c/
++sim_t::interactive_fregs	interactive.cc	/^void sim_t::interactive_fregs(const std::string& c/
++sim_t::interactive_help	interactive.cc	/^void sim_t::interactive_help(const std::string& cm/
++sim_t::interactive_mem	interactive.cc	/^void sim_t::interactive_mem(const std::string& cmd/
++sim_t::interactive_pc	interactive.cc	/^void sim_t::interactive_pc(const std::string& cmd,/
++sim_t::interactive_quit	interactive.cc	/^void sim_t::interactive_quit(const std::string& cm/
++sim_t::interactive_reg	interactive.cc	/^void sim_t::interactive_reg(const std::string& cmd/
++sim_t::interactive_run	interactive.cc	/^void sim_t::interactive_run(const std::string& cmd/
++sim_t::interactive_run_noisy	interactive.cc	/^void sim_t::interactive_run_noisy(const std::strin/
++sim_t::interactive_run_silent	interactive.cc	/^void sim_t::interactive_run_silent(const std::stri/
++sim_t::interactive_str	interactive.cc	/^void sim_t::interactive_str(const std::string& cmd/
++sim_t::interactive_until	interactive.cc	/^void sim_t::interactive_until(const std::string& c/
++sim_t::log	sim.h	54
++sim_t::main	sim.cc	/^void sim_t::main()$/
++sim_t::make_config_string	sim.cc	/^void sim_t::make_config_string()$/
++sim_t::mem	sim.h	37
++sim_t::mem_to_addr	sim.h	/^  reg_t mem_to_addr(char* x) { return x - mem + DR/
++sim_t::memsz	sim.h	38
++sim_t::mmio_load	sim.cc	/^bool sim_t::mmio_load(reg_t addr, size_t len, uint/
++sim_t::mmio_store	sim.cc	/^bool sim_t::mmio_store(reg_t addr, size_t len, con/
++sim_t::procs	sim.h	40
++sim_t::read_chunk	sim.cc	/^void sim_t::read_chunk(addr_t taddr, size_t len, v/
++sim_t::reset	sim.h	/^  void reset() { }$/
++sim_t::rtc	sim.h	43
++sim_t::run	sim.cc	/^int sim_t::run()$/
++sim_t::set_debug	sim.cc	/^void sim_t::set_debug(bool value)$/
++sim_t::set_gdbserver	sim.h	/^  void set_gdbserver(gdbserver_t* gdbserver) { thi/
++sim_t::set_histogram	sim.cc	/^void sim_t::set_histogram(bool value)$/
++sim_t::set_log	sim.cc	/^void sim_t::set_log(bool value)$/
++sim_t::set_procs_debug	sim.cc	/^void sim_t::set_procs_debug(bool value)$/
++sim_t::sim_t	sim.cc	/^sim_t::sim_t(const char* isa, size_t nprocs, size_/
++sim_t::step	sim.cc	/^void sim_t::step(size_t n)$/
++sim_t::target	sim.h	98
++sim_t::write_chunk	sim.cc	/^void sim_t::write_chunk(addr_t taddr, size_t len, /
++sim_t::~sim_t	sim.cc	/^sim_t::~sim_t()$/
++sim_thread_main	sim.cc	/^void sim_thread_main(void* arg)$/
++size	gdbserver.cc	/^unsigned int circular_buffer_t<T>::size() const$/
++slot	gdbserver.h	121
++slot::SLOT_DATA0	gdbserver.h	123
++slot::SLOT_DATA1	gdbserver.h	124
++slot::SLOT_DATA_LAST	gdbserver.h	125
++slot::SLOT_INST0	gdbserver.h	122
++slot_offset128	gdbserver.h	130
++slot_offset32	gdbserver.h	128
++slot_offset64	gdbserver.h	129
++software_breakpoint_t	gdbserver.h	50
++software_breakpoint_t::instruction	gdbserver.h	55
++software_breakpoint_t::size	gdbserver.h	54
++software_breakpoint_t::vaddr	gdbserver.h	53
++sq	gdbserver.cc	/^static uint32_t sq(unsigned int src, unsigned int /
++sreg_t	decode.h	18
++srli	gdbserver.cc	/^static uint32_t srli(unsigned int dest, unsigned i/
++srs_bank	srs.h	33
++srs_entry	srs.h	23
++srs_frame	srs.h	28
++srs_t	srs.h	45
++srs_t::access_check	srs.cc	/^bool srs_t::access_check(reg_t addr, size_t len) {/
++srs_t::access_check_cntr	srs.h	58
++srs_t::bank_a	srs.h	47
++srs_t::bank_b	srs.h	48
++srs_t::bank_swap	srs.cc	/^void srs_t::bank_swap() {$/
++srs_t::base	srs.cc	/^void srs_t::base(reg_t addr) {$/
++srs_t::context_switches	srs.h	56
++srs_t::ctx_switch_stats	srs.h	60
++srs_t::delegate	srs.cc	/^void srs_t::delegate(reg_t addr) {$/
++srs_t::delegate_move	srs.cc	/^void srs_t::delegate_move(reg_t addr) {$/
++srs_t::enter	srs.cc	/^void srs_t::enter() {$/
++srs_t::exit	srs.cc	/^void srs_t::exit() {$/
++srs_t::fast_context_switches	srs.h	57
++srs_t::find_entry	srs.cc	/^struct srs_entry *srs_t::find_entry(reg_t addr) {$/
++srs_t::get_access_check_cntr	srs.cc	/^unsigned int srs_t::get_access_check_cntr() {$/
++srs_t::get_context_switches	srs.cc	/^unsigned int srs_t::get_context_switches() {$/
++srs_t::get_cycle_count	srs.cc	/^unsigned int srs_t::get_cycle_count(int instr) {$/
++srs_t::get_fast_context_switches	srs.cc	/^unsigned int srs_t::get_fast_context_switches() {$/
++srs_t::get_inst_count	srs.cc	/^unsigned int srs_t::get_inst_count(int instr) {$/
++srs_t::inst_count	srs.h	55
++srs_t::is_on	srs.cc	/^bool srs_t::is_on(reg_t priv) {$/
++srs_t::last_ctx_switch	srs.h	51
++srs_t::limit	srs.cc	/^void srs_t::limit(reg_t addr) {$/
++srs_t::mode	srs.h	53
++srs_t::on	srs.h	52
++srs_t::pop	srs.cc	/^void srs_t::pop() {$/
++srs_t::print_state	srs.cc	/^void srs_t::print_state() {$/
++srs_t::print_stats	srs.cc	/^void srs_t::print_stats(processor_t *proc) {$/
++srs_t::push	srs.cc	/^void srs_t::push() {$/
++srs_t::srs_t	srs.cc	/^srs_t::srs_t() :$/
++srs_t::stack	srs.h	49
++srs_t::stack_size	srs.h	50
++srs_t::sub	srs.cc	/^void srs_t::sub(reg_t base, reg_t limit) {$/
++srs_t::switch_ctx	srs.cc	/^void srs_t::switch_ctx(reg_t cycle, reg_t pc, reg_/
++srs_t::total_cycles	srs.cc	/^unsigned int srs_t::total_cycles() {$/
++srs_t::total_instructions	srs.cc	/^unsigned int srs_t::total_instructions() {$/
++srs_t::turn_off	srs.cc	/^void srs_t::turn_off() {$/
++srs_t::turn_on	srs.cc	/^void srs_t::turn_on(reg_t priv) {$/
++state_t	processor.h	85
++state_t::FPR	processor.h	93
++state_t::STEP_NONE	processor.h	131
++state_t::STEP_STEPPED	processor.h	133
++state_t::STEP_STEPPING	processor.h	132
++state_t::XPR	processor.h	92
++state_t::dcsr	processor.h	118
++state_t::dpc	processor.h	116
++state_t::dscratch	processor.h	117
++state_t::fflags	processor.h	124
++state_t::frm	processor.h	125
++state_t::instcntr	processor.h	122
++state_t::last_inst_priv	processor.h	140
++state_t::load_reservation	processor.h	136
++state_t::log_reg_write	processor.h	139
++state_t::mbadaddr	processor.h	99
++state_t::mcause	processor.h	102
++state_t::mcontrol	processor.h	120
++state_t::medeleg	processor.h	106
++state_t::mepc	processor.h	98
++state_t::mideleg	processor.h	107
++state_t::mie	processor.h	104
++state_t::minstret	processor.h	103
++state_t::mip	processor.h	105
++state_t::mscounteren	processor.h	109
++state_t::mscratch	processor.h	100
++state_t::mstatus	processor.h	97
++state_t::mtvec	processor.h	101
++state_t::mucounteren	processor.h	108
++state_t::num_triggers	processor.h	89
++state_t::pc	processor.h	91
++state_t::prv	processor.h	96
++state_t::regfile_t	processor.h	92
++state_t::regfile_t	processor.h	93
++state_t::reset	processor.cc	/^void state_t::reset()$/
++state_t::sbadaddr	processor.h	111
++state_t::scause	processor.h	115
++state_t::sepc	processor.h	110
++state_t::serialized	processor.h	126
++state_t::single_step	processor.h	134
++state_t::sptbr	processor.h	114
++state_t::sscratch	processor.h	112
++state_t::stvec	processor.h	113
++state_t::tdata2	processor.h	121
++state_t::tselect	processor.h	119
++std::function	extensions.cc	/^std::function<extension_t*()> find_extension(const/
++store_func	mmu.h	/^  #define store_func(type) \\$/
++sw	gdbserver.cc	/^static uint32_t sw(unsigned int src, unsigned int /
++swap_csr	encoding.h	/^#define swap_csr(reg, val) ({ unsigned long __tmp;/
++tag	mmu.h	30
++trace_opcode	tracer.h	/^static inline void trace_opcode(processor_t* p, in/
++trap_t	trap.h	11
++trap_t::_name	trap.h	20
++trap_t::cause	trap.h	/^  reg_t cause() { return which; }$/
++trap_t::get_badaddr	trap.h	/^  virtual reg_t get_badaddr() { abort(); }$/
++trap_t::has_badaddr	trap.h	/^  virtual bool has_badaddr() { return false; }$/
++trap_t::name	trap.cc	/^const char* trap_t::name()$/
++trap_t::trap_t	trap.h	/^  trap_t(reg_t which) : which(which) {}$/
++trap_t::which	trap.h	21
++trigger_matched_t	mmu.h	35
++trigger_matched_t::address	mmu.h	44
++trigger_matched_t::data	mmu.h	45
++trigger_matched_t::index	mmu.h	42
++trigger_matched_t::operation	mmu.h	43
++trigger_matched_t::trigger_matched_t	mmu.h	/^    trigger_matched_t(int index,$/
++trigger_operation_t	processor.h	148
++unlikely	common.h	/^#define unlikely(x) __builtin_expect(x, 0)$/
++validate_csr	decode.h	/^#define validate_csr(which, write) ({ \\$/
++validate_vm	processor.cc	/^static bool validate_vm(int max_xlen, reg_t vm)$/
++write_csr	encoding.h	/^#define write_csr(reg, val) ({ \\$/
++xd	rocc.h	12
++xori	gdbserver.cc	/^static uint32_t xori(unsigned int dest, unsigned i/
++xpr_name	regnames.cc	5
++xs1	rocc.h	11
++xs2	rocc.h	10
++zext32	decode.h	/^#define zext32(x) ((reg_t)(uint32_t)(x))$/
++zext_xlen	decode.h	/^#define zext_xlen(x) (((reg_t)(x) << (64-xlen)) >>/
+diff --git a/spike_main/spike.cc b/spike_main/spike.cc
+index 424bf37..892dada 100644
+--- a/spike_main/spike.cc
++++ b/spike_main/spike.cc
+@@ -12,6 +12,7 @@
+ #include <vector>
+ #include <string>
+ #include <memory>
++#include "srs.h"
+ 
+ static void help()
+ {
+@@ -23,15 +24,16 @@ static void help()
+   fprintf(stderr, "  -g                    Track histogram of PCs\n");
+   fprintf(stderr, "  -l                    Generate a log of execution\n");
+   fprintf(stderr, "  -h                    Print this help message\n");
+-  fprintf(stderr, "  -H                 Start halted, allowing a debugger to connect\n");
++  fprintf(stderr, "  -H                    Start halted, allowing a debugger to connect\n");
+   fprintf(stderr, "  --isa=<name>          RISC-V ISA string [default %s]\n", DEFAULT_ISA);
+   fprintf(stderr, "  --ic=<S>:<W>:<B>      Instantiate a cache model with S sets,\n");
+   fprintf(stderr, "  --dc=<S>:<W>:<B>        W ways, and B-byte blocks (with S and\n");
+   fprintf(stderr, "  --l2=<S>:<W>:<B>        B both powers of 2).\n");
+   fprintf(stderr, "  --extension=<name>    Specify RoCC Extension\n");
+   fprintf(stderr, "  --extlib=<name>       Shared library to load\n");
+-  fprintf(stderr, "  --gdb-port=<port>  Listen on <port> for gdb to connect\n");
++  fprintf(stderr, "  --gdb-port=<port>     Listen on <port> for gdb to connect\n");
+   fprintf(stderr, "  --dump-config-string  Print platform configuration string and exit\n");
++  fprintf(stderr, "  --xscen=<mode>        Set xscen mode (0=strict, 1=lax, 2=debug)\n");
+   exit(1);
+ }
+ 
+@@ -42,6 +44,7 @@ int main(int argc, char** argv)
+   bool histogram = false;
+   bool log = false;
+   bool dump_config_string = false;
++  unsigned xscen_mode = XSCEN_MODE_STRICT;
+   size_t nprocs = 1;
+   size_t mem_mb = 0;
+   std::unique_ptr<icache_sim_t> ic;
+@@ -75,6 +78,7 @@ int main(int argc, char** argv)
+       exit(-1);
+     }
+   });
++  parser.option(0, "xscen", 1, [&](const char* s){xscen_mode=atoi(s);});
+ 
+   auto argv1 = parser.parse(argv);
+   std::vector<std::string> htif_args(argv1, (const char*const*)argv + argc);
+@@ -100,6 +104,7 @@ int main(int argc, char** argv)
+     if (ic) s.get_core(i)->get_mmu()->register_memtracer(&*ic);
+     if (dc) s.get_core(i)->get_mmu()->register_memtracer(&*dc);
+     if (extension) s.get_core(i)->register_extension(extension());
++    s.get_core(i)->get_mmu()->get_srs()->set_enforcing_mode(xscen_mode);
+   }
+ 
+   s.set_debug(debug);

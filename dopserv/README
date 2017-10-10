@@ -1,17 +1,28 @@
 Evaluation code for DOP attack
 ==============================
 
+DOP server build system currently supports only Spike with default memory
+layout. Spike must be compiled without --enable-pulpino option. This can be
+done by removing the option from ./build-rv32ima.sh and building the toolchain
+again.
+
 Build instructions
 ------------------
 
-`riscv32-unknown-elf-gcc` binary must be in PATH and the assembler must support Xscen extensions.
-Makefile uses GCC with `-Xassembler -march=rv32i`,
+`riscv32-unknown-elf-gcc` binary must be in PATH and the assembler must support
+Xscen extensions. Makefile uses GCC with `-Xassembler -march=rv32ixscen`,
 
 ELF file that can be run with spike and proxy kernel under Linux: `make dopserv`
 
 Bare binary with no IO: make target dopserv.noio.bare `make dopserv.noio.bare`
 
 Instrumented binary: `make dopserv.noio.bare.wlibc.xscen`
+
+You can make all necessary demonstration binaries with `make demo` including
+- dopserv.noio.bare: vanilla binary with benign input
+- dopserv.noio.bare.attack: vanilla binary with malicious input
+- dopserv.noio.bare.wlibc.xscen: instrumented binary with benign input
+- dopserv.noio.bare.wlibc.xscen.attack: instrumented binary with malicious input
 
 Bare binaries for pulpino core:
 - copy this directory under sw/apps
@@ -31,9 +42,129 @@ Bare binaries: `spike <binary name>`
 
 Binaries with proxy kernel dependencies: `spike pk <binary name>`
 
+### dopserv.noio.bare
+
+Normal binary dopserv.noio.bare runs normally with exit code 0. HardScope-enabled
+Spike always prints execution statistics after finishing:
+
+```
+$ spike dopserv.noio.bare; echo $?
+Cycles reported by CPU: 54433
+...
+0
+```
+
+### dopserv.noio.bare.attack
+
+With malicious input, the exploit triggers an illegal memory access which is
+reported by Spike. This means that the attack is working.
+
+```
+$ spike dopserv.noio.bare.attack; echo $?
+*** FAILED *** (tohost = 1337)
+Cycles reported by CPU: 220613
+...
+57
+```
+
+The trap can be seen by enabling Spike's logging output:
+
+```
+spike -l dopserv.noio.bare.attack 2>&1 | grep -C 3 trap
+core   0: 0xffffffff80001728 (0x0280006f) j       pc + 0x28
+core   0: 0xffffffff80001750 (0xfe442783) lw      a5, -28(s0)
+core   0: 0xffffffff80001754 (0x0007a783) lw      a5, 0(a5)
+core   0: exception trap_load_address_misaligned, epc 0xffffffff80001754
+core   0:           badaddr 0x0000000041414141
+core   0: 0x00000000800000d8 (0xef010113) addi    sp, sp, -272
+core   0: 0xffffffff800000dc (0x00112223) sw      ra, 4(sp)
+```
+
+The accessed address 0x41414141 is configured in exploit.py.
+
+### dopserv.noio.bare.wlibc.xscen
+
+Program runs normally with instrumentation and benign input. Instrumented
+binaries yield more output from Spike.
+
+```
+$ spike dopserv.noio.bare.wlibc.xscen 1>/dev/null; echo $?
+Cycles reported by CPU: 58213
+Xscen instructions: 3338
+  sbent :   550   550
+  srbse :   730   730
+  srlmt :   730   730
+  srdlg :   721  1442
+  srdlgm:    57   114
+  sbxit :   550   550
+  srsub :     0     0
+...
+0
+```
+
+### dopserv.noio.bare.wlibc.xscen
+
+Instrumented binary stops the attack and Spike informs the user about
+scope violation caught by HardScope.
+
+```
+$ spike dopserv.noio.bare.wlibc.xscen.attack
+...
+   SRS STATE:   frames in stack: 4
+       BANK A 2                                     BANK B 0
+   base               limit                 base               limit
+   0xffffffff80029be0 0xffffffff80029fe1
+   0xffffffff80029ba0 0xffffffff80029bcf
+
+   topmost frame in stack
+   base               limit
+   0xffffffff80004c90 0xffffffff80004c97
+   0xffffffff800071e0 0xffffffff800071fd
+   0xffffffff8000a224 0xffffffff8000a623
+   0xffffffff80004cbc 0xffffffff80004cc6
+   0xffffffff8002a150 0xffffffff8002a58f
+   0xffffffff80029bd0 0xffffffff8002a14f
+   0xffffffff80029be0 0xffffffff80029fe1
+
+scope violation when load 0xffffffff80029fe2, len=1, pc=ffffffff800037d8
+strict mode
+```
+
+### dopserv
+
+dopserv binary with IO can be run with proxy kernel. It supports commands
+PUT, GET, PWD, CWD and QUIT. It does not support interactive sessions very well.
+
+```
+$ echo -e 'CWD dir1\nPUT .message\nWelcome to %V! Current directory is %C\r\0PWD\nCWD otherdir\nQUIT\n' | spike pk dopserv
+changing to dir1
+putting to .message
+220 written 39 bytes: Welcome to %V! Current directory is %C
+dir1
+220
+changing to otherdir
+220-Welcome to DOPserv! Current directory is otherdirBYE
+Cycles reported by CPU: 366883
+Xscen instructions: 0
+  sbent :     0     0
+  srbse :     0     0
+  srlmt :     0     0
+  srdlg :     0     0
+  srdlgm:     0     0
+  sbxit :     0     0
+  srsub :     0     0
+Xscen context switches: 0
+Xscen fast context switches: 0
+Access checks: 0
+```
+
 Exploit
 -------
 
-`exploit.py` is a script that generates a simple payload to trigger the buffer overflow vulnerability in `sreplace` function.
-It can not be used to conduct a full DOP attack at the moment.
-Exploit payload is included in `dopserv_noio_attack.c` and it is compiled into the noio binaries that can be used for bare metal targets.
+`exploit.py` is a script that generates a simple payload to trigger the buffer
+overflow vulnerability in `sreplace` function. It can not be used to conduct a
+full DOP attack at the moment. The build system generates
+`dopserv_noio_attack.c` with `exploit.py`. The file contains the malicious
+payload that triggers the ProFTPD vulnerability. It is compiled into the noio
+binaries that can be used for bare metal targets.
+

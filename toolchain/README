@@ -1,7 +1,10 @@
 RISC-V toolchain
 ================
 
-Here you can find the RISC-V toolchain and patches.
+This directory contains the RISC-V toolchain and patches.
+In these instructions riscv-tools is the name of directory that contains
+sources for RISC-V tools. riscv-install is the installation destination
+directory.
 
 Preparation
 -----------
@@ -27,12 +30,12 @@ Building
 --------
 
 After preparations, you can build the toolchain following the standard procedure
-by setting the RISCV environment variable to install destination directory and
-running `build-rv32ima.sh` in riscv-tools directory. It's recommended to add
-`MAKE="$MAKE -j4"` to build.common file below the `MAKE=...` line, to speed up
-the build process.
+by setting the RISCV environment variable to install destination directory of your
+choice, `/home/user/riscv-install` in this example, and running `build-rv32ima.sh`
+in riscv-tools directory.
 
 ```
+cd riscv-tools
 export RISCV=/home/user/riscv-install
 ./build-rv32ima.sh
 ```
